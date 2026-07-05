@@ -43,17 +43,12 @@ Each vertical is one declarative file the engine consumes. No engine code change
     "make":      { "type": "enum",  "values": ["Honda", "Toyota", "Ford", "BMW", "..."] },
     "model":     { "type": "string" },
     "trim":      { "type": "string" },
-    "year":      { "type": "int",   "min": 1990, "max": 2026 },
-    "price":     { "type": "int",   "unit": "CAD", "min": 0 },
-    "mileage":   { "type": "int",   "unit": "km",  "min": 0 },
+    "year":      { "type": "int",   "min": 1990, "max": 2026, "operators": ["eq","gte","lte","between"] },
+    "price":     { "type": "int",   "unit": "CAD", "min": 0,  "operators": ["lte","gte","between"] },
+    "mileage":   { "type": "int",   "unit": "km",  "min": 0,  "operators": ["lte","gte","between"] },
     "body_type": { "type": "enum",  "values": ["sedan","suv","truck","hatchback","coupe"] },
     "fuel":      { "type": "enum",  "values": ["gas","hybrid","ev","diesel"] },
     "color":    { "type": "enum",  "values": ["red","blue","black","white","silver","..."] }
-  },
-  "operators": {
-    "price":   ["lte","gte","between"],
-    "mileage": ["lte","gte","between"],
-    "year":    ["eq","gte","lte","between"]
   },
   "sort": ["price_asc","price_desc","mileage_asc","year_desc"],
   "defaults": { "sort": "price_asc", "limit": 25 }

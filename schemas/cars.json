@@ -1,0 +1,47 @@
+{
+  "vertical": "cars",
+  "fields": {
+    "make": {
+      "type": "enum",
+      "values": ["Honda", "Toyota", "Ford", "BMW", "Chevrolet", "Hyundai", "Mazda", "Subaru", "Nissan", "Volkswagen"]
+    },
+    "model": {
+      "type": "string"
+    },
+    "year": {
+      "type": "int",
+      "min": 2005,
+      "max": 2026,
+      "operators": ["eq", "gte", "lte", "between"]
+    },
+    "price": {
+      "type": "int",
+      "unit": "CAD",
+      "min": 0,
+      "operators": ["lte", "gte", "between"]
+    },
+    "mileage": {
+      "type": "int",
+      "unit": "km",
+      "min": 0,
+      "operators": ["lte", "gte", "between"]
+    },
+    "body_type": {
+      "type": "enum",
+      "values": ["sedan", "suv", "truck", "hatchback", "coupe"]
+    },
+    "fuel": {
+      "type": "enum",
+      "values": ["gas", "hybrid", "ev", "diesel"]
+    },
+    "color": {
+      "type": "enum",
+      "values": ["red", "blue", "black", "white", "silver", "grey", "green"]
+    }
+  },
+  "sort": ["price_asc", "price_desc", "mileage_asc", "year_desc"],
+  "defaults": {
+    "sort": "price_asc",
+    "limit": 25
+  }
+}
