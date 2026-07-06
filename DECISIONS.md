@@ -16,3 +16,5 @@
 9. **LLM provider: Anthropic (Claude) via the Anthropic Python SDK.** One dependency beyond stdlib.
 10. **Operators are field-local** (nested in each field), not a separate top-level block — single source of truth per field.
 11. **OPEN:** revisit deriving operators from type (every int implies lte/gte/between/eq) once the validator exists — would remove per-field operator repetition across schemas. Deferred until there's a consumer to design against.
+12. **Structured output via JSON-mode prompting** for the tracer. Tool-use / function-calling is the P1 production upgrade (deletes the malformed-JSON failure class entirely); switching should stay cheap — the translator is the only module that touches the API.
+13. **Translation model: `claude-haiku-4-5-20251001`** (Haiku — fast/cheap, sufficient for schema-bounded translation). Tech debt: model name is hardcoded in `translator.py`; move to config/env in a later pass.
