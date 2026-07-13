@@ -1,0 +1,54 @@
+{
+  "vertical": "car_rentals",
+  "fields": {
+    "pickup_city": {
+      "type": "enum",
+      "values": ["Toronto", "Vancouver", "Montreal", "Calgary", "Ottawa", "Halifax", "Victoria", "Edmonton", "Winnipeg", "Quebec City"]
+    },
+    "vehicle_class": {
+      "type": "enum",
+      "values": ["economy", "compact", "midsize", "suv", "luxury", "van"]
+    },
+    "make": {
+      "type": "enum",
+      "values": ["Toyota", "Honda", "Hyundai", "Kia", "Ford", "Chevrolet", "Nissan", "Jeep", "BMW", "Mercedes-Benz", "Dodge", "Chrysler"]
+    },
+    "model": {
+      "type": "string"
+    },
+    "price_per_day": {
+      "type": "int",
+      "unit": "CAD",
+      "min": 0,
+      "operators": ["lte", "gte", "between"]
+    },
+    "seats": {
+      "type": "int",
+      "min": 2,
+      "max": 12,
+      "operators": ["eq", "gte", "lte"]
+    },
+    "transmission": {
+      "type": "enum",
+      "values": ["automatic", "manual"]
+    },
+    "fuel": {
+      "type": "enum",
+      "values": ["gas", "hybrid", "ev"]
+    },
+    "supplier": {
+      "type": "enum",
+      "values": ["Hertz", "Avis", "Enterprise", "Budget", "National"]
+    },
+    "unlimited_mileage": {
+      "type": "enum",
+      "values": ["yes", "no"]
+    }
+  },
+  "sort": ["price_per_day_asc", "price_per_day_desc", "seats_desc"],
+  "defaults": {
+    "sort": "price_per_day_asc",
+    "limit": 25
+  },
+  "display": ["title", "supplier", "pickup_city", "vehicle_class", "price_per_day", "seats", "transmission", "fuel"]
+}

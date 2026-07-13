@@ -1,0 +1,50 @@
+{
+  "vertical": "flights",
+  "fields": {
+    "origin": {
+      "type": "enum",
+      "values": ["Toronto", "Vancouver", "Montreal", "Calgary", "Ottawa", "Halifax"]
+    },
+    "destination": {
+      "type": "enum",
+      "values": ["London", "Paris", "Lisbon", "Tokyo", "New York", "Los Angeles", "Miami", "Cancun", "Rome", "Barcelona", "Amsterdam", "Dubai"]
+    },
+    "airline": {
+      "type": "enum",
+      "values": ["Air Canada", "WestJet", "Porter", "Flair", "Swoop"]
+    },
+    "stops": {
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "operators": ["eq", "lte", "gte"]
+    },
+    "price": {
+      "type": "int",
+      "unit": "CAD",
+      "min": 0,
+      "operators": ["lte", "gte", "between"]
+    },
+    "duration_hours": {
+      "type": "int",
+      "unit": "hours",
+      "min": 1,
+      "max": 30,
+      "operators": ["lte", "gte", "between"]
+    },
+    "cabin_class": {
+      "type": "enum",
+      "values": ["economy", "premium economy", "business", "first"]
+    },
+    "month": {
+      "type": "enum",
+      "values": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    }
+  },
+  "sort": ["price_asc", "price_desc", "duration_hours_asc", "stops_asc"],
+  "defaults": {
+    "sort": "price_asc",
+    "limit": 25
+  },
+  "display": ["title", "airline", "origin", "destination", "stops", "price", "duration_hours", "cabin_class"]
+}

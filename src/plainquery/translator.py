@@ -70,6 +70,15 @@ def _build_system_prompt(schema: Schema) -> str:
         '- Prefer sort over invented thresholds. E.g. "low mileage" → sort by mileage_asc, NOT mileage < some guess.',
         "- If a user term doesn't match any field, put it in unmapped. Never invent fields.",
         "- For numeric values, interpret common shorthands: 25k = 25000, 50K = 50000, etc.",
+        "",
+        "## Accounting rule",
+        "Every meaningful term or phrase in the user's query must be accounted for.",
+        "It either (a) maps to a field filter or sort, or (b) appears in unmapped.",
+        "Never silently discard a term because it seems like context or because you",
+        "understood its intent. If a phrase is meaningful but doesn't fit any field",
+        '— e.g. a rental duration, a date range, an amenity not in the schema —',
+        "it MUST go in unmapped. Ignore only pure filler words (articles, prepositions,",
+        '"please", conjunctions, etc.).',
     ]
 
     return "\n".join(lines)

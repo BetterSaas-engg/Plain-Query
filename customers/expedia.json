@@ -1,0 +1,17 @@
+{
+  "name": "Expedia",
+  "verticals": {
+    "hotels": {
+      "schema": "schemas/hotels.json",
+      "data": "data/hotels.json"
+    },
+    "flights": {
+      "schema": "schemas/flights.json",
+      "data": "data/flights.json"
+    },
+    "car_rentals": {
+      "schema": "schemas/car_rentals.json",
+      "data": "data/car_rentals.json"
+    }
+  }
+}
