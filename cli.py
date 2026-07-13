@@ -54,6 +54,11 @@ def main():
             print(f"  {' | '.join(parts)}")
     else:
         print("  (no matches)")
+        if result.suggestions:
+            print()
+            print("Try loosening your search:")
+            for s in result.suggestions:
+                print(f"  - {s.change} -> {s.match_count} matches")
     print("-" * 60)
 
 

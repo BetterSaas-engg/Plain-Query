@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .backend import search
+from .loosen import Suggestion, suggest
 from .schema import Schema, load_schema
 from .translator import CandidateFilter, translate
 from .validator import ValidatedFilter, validate
@@ -24,6 +25,7 @@ class SearchResult:
     unmapped: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     display: list[str] = field(default_factory=list)
+    suggestions: list[Suggestion] = field(default_factory=list)
 
 
 def run(query: str, schema_path: str, data_path: str) -> SearchResult:
@@ -35,6 +37,10 @@ def run(query: str, schema_path: str, data_path: str) -> SearchResult:
     vf: ValidatedFilter = validate(candidate, schema)
     rows = search(data, vf, schema)
 
+    suggestions = []
+    if not rows and vf.filters:
+        suggestions = suggest(data, vf, schema)
+
     return SearchResult(
         rows=rows,
         total_matches=len(rows),
@@ -44,4 +50,5 @@ def run(query: str, schema_path: str, data_path: str) -> SearchResult:
         unmapped=vf.unmapped,
         notes=vf.notes,
         display=schema.display,
+        suggestions=suggestions,
     )
