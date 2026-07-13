@@ -75,12 +75,14 @@ def main():
 
     # 3. Needs input — ask instead of searching
     if result.needs_input:
-        print("\nNEEDS INPUT:")
-        if result.missing_essential:
-            print(f"  Missing essential fields: {result.missing_essential}")
-        if not result.validated_filter and result.unmapped:
-            print("  Could not map any terms to filters.")
+        if result.needs_input_kind == "not_understood":
+            print("\nNOT UNDERSTOOD:")
+            print("  Could not map any part of the search to our filters.")
+            print(f"  Unmapped terms: {result.unmapped}")
             print(f"  Available fields: {result.available_fields}")
+        elif result.needs_input_kind == "missing_essential":
+            print("\nNEEDS INPUT:")
+            print(f"  Missing essential fields: {result.missing_essential}")
         print("-" * 60)
         return
 

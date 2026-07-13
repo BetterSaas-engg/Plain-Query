@@ -186,3 +186,91 @@ def test_no_term_in_both_filter_and_unmapped(schema):
     assert result.filters["make"] == "Honda"
     # "Honda" must be removed from unmapped since it's in the filter
     assert "Honda" not in result.unmapped
+
+
+# === NEEDS INPUT PRECEDENCE (engine-level, tested via run()) ===
+
+from src.plainquery.engine import run as engine_run
+from unittest.mock import patch
+
+
+def _mock_translate_empty_with_unmapped(text, schema):
+    """Simulate LLM returning nothing mapped, terms in unmapped."""
+    return CandidateFilter(filters={}, unmapped=["romantic", "rooftop pool"])
+
+
+def _mock_translate_partial(text, schema):
+    """Simulate LLM mapping some fields but not dates."""
+    return CandidateFilter(filters={"city": "Toronto", "property_type": "hostel"})
+
+
+@patch("src.plainquery.engine.translate")
+def test_empty_filter_with_unmapped_returns_not_understood(mock_translate):
+    """Empty filter + unmapped terms → not_understood, not a date prompt."""
+    mock_translate.side_effect = _mock_translate_empty_with_unmapped
+    result = engine_run("a romantic place", "schemas/hotels.json", "data/hotels.json")
+    assert result.needs_input is True
+    assert result.needs_input_kind == "not_understood"
+    assert result.missing_essential == []  # should NOT list dates
+
+
+@patch("src.plainquery.engine.translate")
+def test_partial_filter_missing_essential_asks_for_dates(mock_translate):
+    """Has real constraints but missing essential → missing_essential."""
+    mock_translate.side_effect = _mock_translate_partial
+    result = engine_run("hostel in Toronto", "schemas/hotels.json", "data/hotels.json")
+    assert result.needs_input is True
+    assert result.needs_input_kind == "missing_essential"
+    assert "check_in" in result.missing_essential
+    assert "check_out" in result.missing_essential
+
+
+# === REGRESSION: non-temporal queries must NOT produce date fields ===
+
+
+def _mock_translate_cheap_hostel(text, schema):
+    """Correct behavior: 'cheap hostel in Toronto' maps city + type, no dates."""
+    return CandidateFilter(filters={"city": "Toronto", "property_type": "hostel"})
+
+
+def _mock_translate_hostel_toronto(text, schema):
+    """Correct behavior: 'hostel in Toronto' maps city + type, no dates."""
+    return CandidateFilter(filters={"city": "Toronto", "property_type": "hostel"})
+
+
+def _mock_translate_nice_hotel_vancouver(text, schema):
+    """Correct behavior: 'nice hotel in Vancouver' maps city + type, no dates."""
+    return CandidateFilter(filters={"city": "Vancouver", "property_type": "hotel"})
+
+
+@patch("src.plainquery.engine.translate")
+def test_cheap_hostel_no_invented_dates(mock_translate):
+    """'cheap hostel in Toronto' must not produce date fields — asks for dates."""
+    mock_translate.side_effect = _mock_translate_cheap_hostel
+    result = engine_run("cheap hostel in Toronto", "schemas/hotels.json", "data/hotels.json")
+    assert "check_in" not in result.validated_filter
+    assert "check_out" not in result.validated_filter
+    assert result.needs_input is True
+    assert result.needs_input_kind == "missing_essential"
+
+
+@patch("src.plainquery.engine.translate")
+def test_hostel_toronto_no_invented_dates(mock_translate):
+    """'hostel in Toronto' must not produce date fields — asks for dates."""
+    mock_translate.side_effect = _mock_translate_hostel_toronto
+    result = engine_run("hostel in Toronto", "schemas/hotels.json", "data/hotels.json")
+    assert "check_in" not in result.validated_filter
+    assert "check_out" not in result.validated_filter
+    assert result.needs_input is True
+    assert result.needs_input_kind == "missing_essential"
+
+
+@patch("src.plainquery.engine.translate")
+def test_nice_hotel_vancouver_no_invented_dates(mock_translate):
+    """'nice hotel in Vancouver' must not produce date fields — asks for dates."""
+    mock_translate.side_effect = _mock_translate_nice_hotel_vancouver
+    result = engine_run("nice hotel in Vancouver", "schemas/hotels.json", "data/hotels.json")
+    assert "check_in" not in result.validated_filter
+    assert "check_out" not in result.validated_filter
+    assert result.needs_input is True
+    assert result.needs_input_kind == "missing_essential"

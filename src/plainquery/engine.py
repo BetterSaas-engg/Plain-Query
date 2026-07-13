@@ -27,17 +27,9 @@ class SearchResult:
     display: list[str] = field(default_factory=list)
     suggestions: list[Suggestion] = field(default_factory=list)
     needs_input: bool = False
+    needs_input_kind: str = ""  # "not_understood" or "missing_essential"
     missing_essential: list[str] = field(default_factory=list)
     available_fields: list[str] = field(default_factory=list)
-
-
-def _check_needs_input(vf: ValidatedFilter, schema: Schema) -> tuple[bool, list[str]]:
-    """Check if essential fields are missing. Returns (needs_input, missing_fields)."""
-    missing = []
-    for name, field_def in schema.fields.items():
-        if field_def.essential and name not in vf.filters:
-            missing.append(name)
-    return bool(missing), missing
 
 
 def run(query: str, schema_path: str, data_path: str) -> SearchResult:
@@ -48,11 +40,11 @@ def run(query: str, schema_path: str, data_path: str) -> SearchResult:
     candidate: CandidateFilter = translate(query, schema)
     vf: ValidatedFilter = validate(candidate, schema)
 
-    # Check if we should ask instead of searching
-    needs_input, missing_essential = _check_needs_input(vf, schema)
-    empty_with_unmapped = not vf.filters and bool(vf.unmapped)
+    all_fields = [name for name, fd in schema.fields.items() if not fd.essential]
 
-    if needs_input or empty_with_unmapped:
+    # Precedence: "nothing understood" beats "missing essential"
+    # 1. Empty filter with unmapped terms → we failed to comprehend the query
+    if not vf.filters and bool(vf.unmapped):
         return SearchResult(
             validated_filter=vf.filters,
             sort=vf.sort,
@@ -61,10 +53,27 @@ def run(query: str, schema_path: str, data_path: str) -> SearchResult:
             notes=vf.notes,
             display=schema.display,
             needs_input=True,
+            needs_input_kind="not_understood",
+            available_fields=all_fields,
+        )
+
+    # 2. Has real constraints but missing essential fields → ask for them
+    missing_essential = [
+        name for name, fd in schema.fields.items()
+        if fd.essential and name not in vf.filters
+    ]
+    if missing_essential:
+        return SearchResult(
+            validated_filter=vf.filters,
+            sort=vf.sort,
+            limit=vf.limit,
+            unmapped=vf.unmapped,
+            notes=vf.notes,
+            display=schema.display,
+            needs_input=True,
+            needs_input_kind="missing_essential",
             missing_essential=missing_essential,
-            available_fields=[
-                name for name, fd in schema.fields.items() if not fd.essential
-            ],
+            available_fields=all_fields,
         )
 
     rows = search(data, vf, schema)

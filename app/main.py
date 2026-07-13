@@ -59,6 +59,7 @@ class SearchResponse(BaseModel):
 
     # Needs input
     needs_input: bool = False
+    needs_input_kind: str = ""
     missing_essential: list[str] = []
     available_fields: list[str] = []
 
@@ -111,19 +112,25 @@ def api_search(req: SearchRequest):
     resp.unmapped = vf.unmapped
     resp.notes = vf.notes
 
-    # 4b. Check if essential fields are missing or filter is empty with unmapped
+    # 4b. Check needs_input — precedence: not_understood > missing_essential
+    all_fields = [name for name, fd in schema.fields.items() if not fd.essential]
+
+    if not vf.filters and bool(vf.unmapped):
+        resp.needs_input = True
+        resp.needs_input_kind = "not_understood"
+        resp.available_fields = all_fields
+        resp.total_time_ms = (time.perf_counter() - total_start) * 1000
+        return resp
+
     missing_essential = [
         name for name, fd in schema.fields.items()
         if fd.essential and name not in vf.filters
     ]
-    empty_with_unmapped = not vf.filters and bool(vf.unmapped)
-
-    if missing_essential or empty_with_unmapped:
+    if missing_essential:
         resp.needs_input = True
+        resp.needs_input_kind = "missing_essential"
         resp.missing_essential = missing_essential
-        resp.available_fields = [
-            name for name, fd in schema.fields.items() if not fd.essential
-        ]
+        resp.available_fields = all_fields
         resp.total_time_ms = (time.perf_counter() - total_start) * 1000
         return resp
 

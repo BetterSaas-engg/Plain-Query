@@ -39,14 +39,13 @@ def _build_system_prompt(schema: Schema) -> str:
     ]
 
     for name, f in schema.fields.items():
-        essential_tag = " [REQUIRED]" if f.essential else ""
         if f.type == "enum":
-            lines.append(f"- {name} (enum): one of {f.values}{essential_tag}")
+            lines.append(f"- {name} (enum): one of {f.values}")
         elif f.type == "string":
-            lines.append(f"- {name} (string): free text match{essential_tag}")
+            lines.append(f"- {name} (string): free text match")
         elif f.type == "date":
             lines.append(
-                f"- {name} (date, ISO YYYY-MM-DD): operators {f.operators}{essential_tag}"
+                f"- {name} (date, ISO YYYY-MM-DD): operators {f.operators}"
             )
         elif f.type == "int":
             range_parts = []
@@ -57,7 +56,7 @@ def _build_system_prompt(schema: Schema) -> str:
             unit = f" ({f.unit})" if f.unit else ""
             range_str = f", range: {', '.join(range_parts)}" if range_parts else ""
             lines.append(
-                f"- {name} (integer{unit}): operators {f.operators}{range_str}{essential_tag}"
+                f"- {name} (integer{unit}): operators {f.operators}{range_str}"
             )
 
     lines += [
@@ -79,6 +78,7 @@ def _build_system_prompt(schema: Schema) -> str:
         "- If a user term doesn't match any field, put it in unmapped. Never invent fields.",
         "- For numeric values, interpret common shorthands: 25k = 25000, 50K = 50000, etc.",
         f'- For date fields, convert mentions to ISO YYYY-MM-DD relative to today ({today}). "next weekend" → the upcoming Saturday/Sunday. "in June" → June of the current or next year, whichever is in the future. All dates must be today or later. If a date is genuinely ambiguous or absent, do NOT invent one — leave the field out.',
+        "- NEVER infer a date from non-temporal language. Words like 'cheap', 'nice', 'available', 'good deal', 'best' are NOT dates. Only emit a date field when the user explicitly states or implies a time (e.g. 'next weekend', 'in June', 'July 20', 'tomorrow'). If the user did not mention a time at all, emit NO date fields — absence is the correct output.",
         "- A term must NEVER appear in both a filter and in unmapped. If you mapped it to a filter, it is accounted for — do not also list it as unmapped.",
         "",
         "## Accounting rule",

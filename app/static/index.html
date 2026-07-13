@@ -659,17 +659,16 @@ function searchWithVertical(v) {
 function renderNeedsInput(data) {
   let html = '<div class="ambiguous-box">';
 
-  // Case 1: empty filter with unmapped terms — we understood nothing useful
-  if (!data.missing_essential.length && Object.keys(data.validated_filter).length === 0) {
-    html += `<h3>We couldn't match your search to any filters</h3>`;
+  // Case 1: not_understood — empty filter, we failed to comprehend the query
+  if (data.needs_input_kind === 'not_understood') {
+    html += `<h3>We couldn't match any part of your search to our filters</h3>`;
     if (data.unmapped && data.unmapped.length > 0) {
-      html += `<p>We understood: ${data.unmapped.map(t => `<strong>"${esc(t)}"</strong>`).join(', ')} — but none of these match available filters.</p>`;
+      html += `<p>These terms don't correspond to any available filter: ${data.unmapped.map(t => `<strong>"${esc(t)}"</strong>`).join(', ')}</p>`;
     }
     const vLabel = { hotels: 'Hotels', flights: 'Flights', car_rentals: 'Car Rentals' }[data.routed_vertical] || data.routed_vertical;
     html += `<p>Here's what you can search ${vLabel} by:</p>`;
     html += '<div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px;">';
-    const allFields = [...(data.missing_essential || []), ...(data.available_fields || [])];
-    for (const f of allFields) {
+    for (const f of (data.available_fields || [])) {
       html += `<span class="badge badge-blue">${friendlyLabel(f)}</span>`;
     }
     html += '</div>';
@@ -677,8 +676,8 @@ function renderNeedsInput(data) {
     return html;
   }
 
-  // Case 2: essential fields missing
-  if (data.missing_essential.length > 0) {
+  // Case 2: missing_essential — has real constraints but needs essential fields
+  if (data.needs_input_kind === 'missing_essential' && data.missing_essential.length > 0) {
     const dateFields = data.missing_essential.filter(f =>
       f.includes('check_in') || f.includes('check_out') || f.includes('date') || f.includes('pickup') || f.includes('dropoff')
     );
