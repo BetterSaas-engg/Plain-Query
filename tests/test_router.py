@@ -66,11 +66,11 @@ def _mock_llm_response(text: str):
     return mock_response
 
 
-@patch("src.plainquery.router.anthropic.Anthropic")
-def test_inferred_unambiguous_routes_correctly(mock_anthropic_cls, customer):
+@patch("src.plainquery.router._get_client")
+def test_inferred_unambiguous_routes_correctly(mock_get_client, customer):
     """An unambiguous LLM response routes to the correct vertical."""
     mock_client = MagicMock()
-    mock_anthropic_cls.return_value = mock_client
+    mock_get_client.return_value = mock_client
     mock_client.messages.create.return_value = _mock_llm_response(
         '{"vertical": "flights", "confidence": "high"}'
     )
@@ -81,11 +81,11 @@ def test_inferred_unambiguous_routes_correctly(mock_anthropic_cls, customer):
     assert result.confidence == "high"
 
 
-@patch("src.plainquery.router.anthropic.Anthropic")
-def test_inferred_ambiguous_returns_no_vertical(mock_anthropic_cls, customer):
+@patch("src.plainquery.router._get_client")
+def test_inferred_ambiguous_returns_no_vertical(mock_get_client, customer):
     """An ambiguous LLM response returns no vertical, not a guess."""
     mock_client = MagicMock()
-    mock_anthropic_cls.return_value = mock_client
+    mock_get_client.return_value = mock_client
     mock_client.messages.create.return_value = _mock_llm_response(
         '{"vertical": null, "confidence": "ambiguous"}'
     )
@@ -96,11 +96,11 @@ def test_inferred_ambiguous_returns_no_vertical(mock_anthropic_cls, customer):
     assert len(result.candidates) == 3
 
 
-@patch("src.plainquery.router.anthropic.Anthropic")
-def test_inferred_api_failure_returns_ambiguous(mock_anthropic_cls, customer):
+@patch("src.plainquery.router._get_client")
+def test_inferred_api_failure_returns_ambiguous(mock_get_client, customer):
     """API failure = fail closed = ambiguous."""
     mock_client = MagicMock()
-    mock_anthropic_cls.return_value = mock_client
+    mock_get_client.return_value = mock_client
     mock_client.messages.create.side_effect = Exception("API down")
 
     result = route("flight to Paris", customer)
@@ -108,11 +108,11 @@ def test_inferred_api_failure_returns_ambiguous(mock_anthropic_cls, customer):
     assert result.confidence == "ambiguous"
 
 
-@patch("src.plainquery.router.anthropic.Anthropic")
-def test_inferred_invalid_vertical_in_response(mock_anthropic_cls, customer):
+@patch("src.plainquery.router._get_client")
+def test_inferred_invalid_vertical_in_response(mock_get_client, customer):
     """LLM returns a vertical that doesn't exist = fail closed."""
     mock_client = MagicMock()
-    mock_anthropic_cls.return_value = mock_client
+    mock_get_client.return_value = mock_client
     mock_client.messages.create.return_value = _mock_llm_response(
         '{"vertical": "spaceships", "confidence": "high"}'
     )
@@ -122,11 +122,11 @@ def test_inferred_invalid_vertical_in_response(mock_anthropic_cls, customer):
     assert result.confidence == "ambiguous"
 
 
-@patch("src.plainquery.router.anthropic.Anthropic")
-def test_inferred_malformed_json_returns_ambiguous(mock_anthropic_cls, customer):
+@patch("src.plainquery.router._get_client")
+def test_inferred_malformed_json_returns_ambiguous(mock_get_client, customer):
     """Malformed JSON from LLM = fail closed."""
     mock_client = MagicMock()
-    mock_anthropic_cls.return_value = mock_client
+    mock_get_client.return_value = mock_client
     mock_client.messages.create.return_value = _mock_llm_response("not json at all")
 
     result = route("whatever", customer)

@@ -74,12 +74,24 @@ def route(text: str, customer: CustomerConfig, vertical: str | None = None) -> R
     return _infer(text, customer)
 
 
-def _infer(text: str, customer: CustomerConfig) -> RouteResult:
-    """Classify a query into a vertical via one LLM call. Fail closed on ambiguity."""
-    load_dotenv()
-    client = anthropic.Anthropic()
+_client = None
+_prompt_cache: dict[str, str] = {}
 
-    # Build vertical summaries for the prompt
+
+def _get_client():
+    global _client
+    if _client is None:
+        load_dotenv()
+        _client = anthropic.Anthropic()
+    return _client
+
+
+def _get_router_prompt(customer: CustomerConfig) -> str:
+    """Build and cache the router system prompt per customer."""
+    cache_key = customer.name
+    if cache_key in _prompt_cache:
+        return _prompt_cache[cache_key]
+
     vertical_descriptions = []
     for v_name, v_config in customer.verticals.items():
         schema = load_schema(v_config["schema"])
@@ -88,7 +100,7 @@ def _infer(text: str, customer: CustomerConfig) -> RouteResult:
             f"- {v_name}: searches by {', '.join(field_names)}"
         )
 
-    system_prompt = (
+    prompt = (
         f"You are a query router for {customer.name}. "
         f"The customer has these search verticals:\n"
         + "\n".join(vertical_descriptions)
@@ -105,11 +117,19 @@ def _infer(text: str, customer: CustomerConfig) -> RouteResult:
         "than no route.\n"
         "- No markdown fences, no explanation, just the JSON object.\n"
     )
+    _prompt_cache[cache_key] = prompt
+    return prompt
+
+
+def _infer(text: str, customer: CustomerConfig) -> RouteResult:
+    """Classify a query into a vertical via one LLM call. Fail closed on ambiguity."""
+    client = _get_client()
+    system_prompt = _get_router_prompt(customer)
 
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=128,
+            max_tokens=64,
             system=system_prompt,
             messages=[{"role": "user", "content": text}],
         )
