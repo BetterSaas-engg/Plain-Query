@@ -36,6 +36,16 @@
     "breakfast_included": {
       "type": "enum",
       "values": ["yes", "no"]
+    },
+    "check_in": {
+      "type": "date",
+      "operators": ["eq", "gte"],
+      "essential": true
+    },
+    "check_out": {
+      "type": "date",
+      "operators": ["eq", "lte"],
+      "essential": true
     }
   },
   "sort": ["price_per_night_asc", "price_per_night_desc", "guest_rating_desc", "star_rating_desc"],

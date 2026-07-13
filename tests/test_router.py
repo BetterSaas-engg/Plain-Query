@@ -51,7 +51,7 @@ def test_context_provided_car_rentals(customer):
     result = route("blah blah", customer, vertical="car_rentals")
     assert result.vertical == "car_rentals"
     assert result.mode == "provided"
-    assert result.schema_path == "schemas/cars.json"
+    assert result.schema_path == "schemas/car_rentals.json"
 
 
 # === Inferred mode (mocked LLM) ===

@@ -73,7 +73,18 @@ def main():
     if result.unmapped:
         print(f"\nUNMAPPED TERMS: {result.unmapped}")
 
-    # 3. Results
+    # 3. Needs input — ask instead of searching
+    if result.needs_input:
+        print("\nNEEDS INPUT:")
+        if result.missing_essential:
+            print(f"  Missing essential fields: {result.missing_essential}")
+        if not result.validated_filter and result.unmapped:
+            print("  Could not map any terms to filters.")
+            print(f"  Available fields: {result.available_fields}")
+        print("-" * 60)
+        return
+
+    # 4. Results
     print(f"\nRESULTS ({result.total_matches} matches):")
     print("-" * 60)
     if result.rows:

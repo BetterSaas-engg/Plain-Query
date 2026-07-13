@@ -4,10 +4,14 @@ Fails closed. Drops individual bad fields (never rejects the whole query).
 Never invents or alters user intent — out-of-range values are dropped, not clamped.
 """
 
+import re
 from dataclasses import dataclass, field
+from datetime import date
 
 from .schema import FieldDef, Schema
 from .translator import CandidateFilter
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @dataclass
@@ -40,6 +44,22 @@ def validate(candidate: CandidateFilter, schema: Schema) -> ValidatedFilter:
     # Validate each filter field
     for field_name, value in candidate.filters.items():
         _validate_field(field_name, value, schema, result)
+
+    # Invariant: a term must never appear in both filters and unmapped.
+    # If the LLM mapped a term to a filter, remove it from unmapped.
+    if result.filters and result.unmapped:
+        filter_values = set()
+        for v in result.filters.values():
+            if isinstance(v, str):
+                filter_values.add(v.lower())
+            elif isinstance(v, dict):
+                for sub in (v.get("value"), v.get("low"), v.get("high")):
+                    if isinstance(sub, str):
+                        filter_values.add(sub.lower())
+        result.unmapped = [
+            term for term in result.unmapped
+            if not any(fv in term.lower() or term.lower() in fv for fv in filter_values)
+        ]
 
     return result
 
@@ -77,6 +97,8 @@ def _validate_field(
         _validate_string(field_name, value, result)
     elif field_def.type == "int":
         _validate_int(field_name, value, field_def, result)
+    elif field_def.type == "date":
+        _validate_date(field_name, value, field_def, result)
 
 
 def _validate_enum(
@@ -202,6 +224,91 @@ def _try_coerce_int(value) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _check_date_not_past(name: str, date_str: str, result: ValidatedFilter) -> bool:
+    """Return True if date is today or future. Adds note and returns False if past."""
+    today = date.today().isoformat()
+    if date_str < today:
+        result.notes.append(
+            f"Field '{name}': date {date_str} is in the past "
+            f"(today is {today}) — ignored."
+        )
+        return False
+    return True
+
+
+def _validate_date(
+    name: str, value, field_def: FieldDef, result: ValidatedFilter
+) -> None:
+    """Validate a date filter (ISO YYYY-MM-DD strings with operators)."""
+    if isinstance(value, str):
+        # Bare date string — treat as eq
+        if not _ISO_DATE_RE.match(value):
+            result.notes.append(
+                f"Field '{name}': '{value}' is not a valid ISO date (YYYY-MM-DD) — ignored."
+            )
+            return
+        if not _check_date_not_past(name, value, result):
+            return
+        if field_def.operators and "eq" not in field_def.operators:
+            result.notes.append(
+                f"Field '{name}': bare date given without a comparison — "
+                f"this field supports: {field_def.operators} — ignored."
+            )
+            return
+        result.filters[name] = {"op": "eq", "value": value}
+        return
+
+    if not isinstance(value, dict):
+        result.notes.append(
+            f"Field '{name}': expected a date string or operator object — ignored."
+        )
+        return
+
+    op = value.get("op")
+    if not isinstance(op, str):
+        result.notes.append(f"Field '{name}': missing or invalid 'op' — ignored.")
+        return
+
+    if field_def.operators and op not in field_def.operators:
+        result.notes.append(
+            f"Field '{name}': operator '{op}' is not allowed. "
+            f"Valid operators: {field_def.operators} — ignored."
+        )
+        return
+
+    if op == "between":
+        low = value.get("low")
+        high = value.get("high")
+        if not isinstance(low, str) or not _ISO_DATE_RE.match(low):
+            result.notes.append(
+                f"Field '{name}': 'between' requires ISO date 'low' — ignored."
+            )
+            return
+        if not isinstance(high, str) or not _ISO_DATE_RE.match(high):
+            result.notes.append(
+                f"Field '{name}': 'between' requires ISO date 'high' — ignored."
+            )
+            return
+        if low > high:
+            result.notes.append(
+                f"Field '{name}': date range {low} to {high} is inverted — ignored."
+            )
+            return
+        if not _check_date_not_past(name, low, result):
+            return
+        result.filters[name] = {"op": "between", "low": low, "high": high}
+    else:
+        val = value.get("value")
+        if not isinstance(val, str) or not _ISO_DATE_RE.match(val):
+            result.notes.append(
+                f"Field '{name}': '{val}' is not a valid ISO date (YYYY-MM-DD) — ignored."
+            )
+            return
+        if not _check_date_not_past(name, val, result):
+            return
+        result.filters[name] = {"op": op, "value": val}
 
 
 def _check_range(value: int, field_def: FieldDef) -> str | None:

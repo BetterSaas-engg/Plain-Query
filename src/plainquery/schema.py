@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-VALID_TYPES = {"enum", "string", "int"}
+VALID_TYPES = {"enum", "string", "int", "date"}
 VALID_OPERATORS = {"eq", "lte", "gte", "between"}
 
 
@@ -20,7 +20,8 @@ class FieldDef:
     min: int | None = None  # int only
     max: int | None = None  # int only
     unit: str | None = None  # int only
-    operators: list[str] = field(default_factory=list)  # int only
+    operators: list[str] = field(default_factory=list)  # int/date
+    essential: bool = False  # if True, search is meaningless without this field
 
 
 @dataclass(frozen=True)
@@ -42,14 +43,25 @@ def _validate_field(name: str, raw: dict) -> FieldDef:
     if ftype not in VALID_TYPES:
         _fail(name, f"unknown type '{ftype}' (allowed: {sorted(VALID_TYPES)})")
 
+    essential = bool(raw.get("essential", False))
+
     if ftype == "enum":
         values = raw.get("values")
         if not values or not isinstance(values, list):
             _fail(name, "enum field must have a non-empty 'values' list")
-        return FieldDef(name=name, type="enum", values=values)
+        return FieldDef(name=name, type="enum", values=values, essential=essential)
 
     if ftype == "string":
-        return FieldDef(name=name, type="string")
+        return FieldDef(name=name, type="string", essential=essential)
+
+    if ftype == "date":
+        operators = raw.get("operators", ["eq", "gte", "lte", "between"])
+        if not isinstance(operators, list):
+            _fail(name, "'operators' must be a list")
+        bad = set(operators) - VALID_OPERATORS
+        if bad:
+            _fail(name, f"invalid operators {sorted(bad)} (allowed: {sorted(VALID_OPERATORS)})")
+        return FieldDef(name=name, type="date", operators=operators, essential=essential)
 
     # int
     fmin = raw.get("min")
@@ -77,6 +89,7 @@ def _validate_field(name: str, raw: dict) -> FieldDef:
         min=fmin, max=fmax,
         unit=raw.get("unit"),
         operators=operators,
+        essential=essential,
     )
 
 

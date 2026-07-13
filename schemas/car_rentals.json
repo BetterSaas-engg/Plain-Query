@@ -43,6 +43,16 @@
     "unlimited_mileage": {
       "type": "enum",
       "values": ["yes", "no"]
+    },
+    "pickup_date": {
+      "type": "date",
+      "operators": ["eq", "gte"],
+      "essential": true
+    },
+    "dropoff_date": {
+      "type": "date",
+      "operators": ["eq", "lte"],
+      "essential": true
     }
   },
   "sort": ["price_per_day_asc", "price_per_day_desc", "seats_desc"],

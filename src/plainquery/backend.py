@@ -18,6 +18,12 @@ def search(data: list[dict], vf: ValidatedFilter, schema: Schema) -> list[dict]:
 def _matches(row: dict, filters: dict, schema: Schema) -> bool:
     """Return True if row satisfies all filters."""
     for field_name, constraint in filters.items():
+        field_def = schema.fields.get(field_name)
+
+        # Date fields are emitted for the customer's system — skip in our reference backend
+        if field_def and field_def.type == "date":
+            continue
+
         value = row.get(field_name)
         if value is None:
             return False
@@ -27,8 +33,6 @@ def _matches(row: dict, filters: dict, schema: Schema) -> bool:
             if not _match_numeric(value, constraint):
                 return False
         else:
-            # Determine match strategy from schema field type
-            field_def = schema.fields.get(field_name)
             if field_def and field_def.type == "string":
                 # String field — case-insensitive substring (free text match)
                 if str(constraint).lower() not in str(value).lower():

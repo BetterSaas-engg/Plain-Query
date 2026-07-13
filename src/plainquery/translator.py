@@ -7,6 +7,7 @@ Validation (enums, ranges, types) is the validator's job.
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import date
 
 import anthropic
 from dotenv import load_dotenv
@@ -27,8 +28,10 @@ MODEL = "claude-haiku-4-5-20251001"
 
 
 def _build_system_prompt(schema: Schema) -> str:
+    today = date.today().isoformat()
     lines = [
         f"You are a search filter translator for a {schema.vertical} search engine.",
+        f"Today's date is {today}. Resolve all relative dates relative to this date.",
         "The user will give you a natural language search query.",
         "Your job: extract structured filters from the query using ONLY the fields below.",
         "",
@@ -36,10 +39,15 @@ def _build_system_prompt(schema: Schema) -> str:
     ]
 
     for name, f in schema.fields.items():
+        essential_tag = " [REQUIRED]" if f.essential else ""
         if f.type == "enum":
-            lines.append(f"- {name} (enum): one of {f.values}")
+            lines.append(f"- {name} (enum): one of {f.values}{essential_tag}")
         elif f.type == "string":
-            lines.append(f"- {name} (string): free text match")
+            lines.append(f"- {name} (string): free text match{essential_tag}")
+        elif f.type == "date":
+            lines.append(
+                f"- {name} (date, ISO YYYY-MM-DD): operators {f.operators}{essential_tag}"
+            )
         elif f.type == "int":
             range_parts = []
             if f.min is not None:
@@ -49,7 +57,7 @@ def _build_system_prompt(schema: Schema) -> str:
             unit = f" ({f.unit})" if f.unit else ""
             range_str = f", range: {', '.join(range_parts)}" if range_parts else ""
             lines.append(
-                f"- {name} (integer{unit}): operators {f.operators}{range_str}"
+                f"- {name} (integer{unit}): operators {f.operators}{range_str}{essential_tag}"
             )
 
     lines += [
@@ -61,7 +69,7 @@ def _build_system_prompt(schema: Schema) -> str:
         "## Output rules",
         "Return ONLY a JSON object. No markdown fences, no explanation, no prose.",
         "The JSON object has these keys:",
-        '- For each matched field: the field name as key. For enum/string fields, the value is a string. For int fields, the value is an object like {"op": "<operator>", "value": <int>} or {"op": "between", "low": <int>, "high": <int>}.',
+        '- For each matched field: the field name as key. For enum/string fields, the value is a string. For int fields, the value is an object like {"op": "<operator>", "value": <int>} or {"op": "between", "low": <int>, "high": <int>}. For date fields, same structure but with ISO date strings: {"op": "eq", "value": "2026-06-15"} or {"op": "between", "low": "2026-06-12", "high": "2026-06-15"}.',
         '- "sort": a string from the sort options, only if the query implies a sort preference. Omit if no preference.',
         '- "unmapped": an array of user terms you could NOT map to any field. Always include this key (empty array if everything mapped).',
         "",
@@ -70,6 +78,8 @@ def _build_system_prompt(schema: Schema) -> str:
         '- Prefer sort over invented thresholds. E.g. "low mileage" → sort by mileage_asc, NOT mileage < some guess.',
         "- If a user term doesn't match any field, put it in unmapped. Never invent fields.",
         "- For numeric values, interpret common shorthands: 25k = 25000, 50K = 50000, etc.",
+        f'- For date fields, convert mentions to ISO YYYY-MM-DD relative to today ({today}). "next weekend" → the upcoming Saturday/Sunday. "in June" → June of the current or next year, whichever is in the future. All dates must be today or later. If a date is genuinely ambiguous or absent, do NOT invent one — leave the field out.',
+        "- A term must NEVER appear in both a filter and in unmapped. If you mapped it to a filter, it is accounted for — do not also list it as unmapped.",
         "",
         "## Accounting rule",
         "Every meaningful term or phrase in the user's query must be accounted for.",

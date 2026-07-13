@@ -39,6 +39,11 @@
     "month": {
       "type": "enum",
       "values": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    },
+    "depart_date": {
+      "type": "date",
+      "operators": ["eq", "gte", "lte", "between"],
+      "essential": true
     }
   },
   "sort": ["price_asc", "price_desc", "duration_hours_asc", "stops_asc"],

@@ -136,3 +136,53 @@ def test_partial_failure_good_survives_bad_dropped(schema):
     assert len(result.notes) == 2
     assert any("maroon" in n for n in result.notes)
     assert any("3000" in n for n in result.notes)
+
+
+# === DATE VALIDATION ===
+
+
+@pytest.fixture
+def hotel_schema():
+    return load_schema("schemas/hotels.json")
+
+
+def test_date_past_rejected_not_clamped(hotel_schema):
+    """A past date must be rejected, not clamped to today."""
+    candidate = CandidateFilter(
+        filters={"check_in": {"op": "eq", "value": "2020-01-01"}}
+    )
+    result = validate(candidate, hotel_schema)
+    assert "check_in" not in result.filters
+    assert any("past" in n for n in result.notes)
+
+
+def test_date_valid_future_accepted(hotel_schema):
+    """A future date passes validation."""
+    candidate = CandidateFilter(
+        filters={"check_in": {"op": "eq", "value": "2027-06-15"}}
+    )
+    result = validate(candidate, hotel_schema)
+    assert result.filters["check_in"] == {"op": "eq", "value": "2027-06-15"}
+    assert result.notes == []
+
+
+def test_date_malformed_rejected(hotel_schema):
+    """Non-ISO date string is rejected."""
+    candidate = CandidateFilter(
+        filters={"check_in": {"op": "eq", "value": "June 15"}}
+    )
+    result = validate(candidate, hotel_schema)
+    assert "check_in" not in result.filters
+    assert any("not a valid ISO date" in n for n in result.notes)
+
+
+def test_no_term_in_both_filter_and_unmapped(schema):
+    """A term must never appear in both filters and unmapped."""
+    candidate = CandidateFilter(
+        filters={"make": "Honda"},
+        unmapped=["Honda"],  # LLM contradiction
+    )
+    result = validate(candidate, schema)
+    assert result.filters["make"] == "Honda"
+    # "Honda" must be removed from unmapped since it's in the filter
+    assert "Honda" not in result.unmapped
