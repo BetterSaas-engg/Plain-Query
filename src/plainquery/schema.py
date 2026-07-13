@@ -30,6 +30,7 @@ class Schema:
     sort_options: list[str]
     default_sort: str
     default_limit: int
+    display: list[str] = field(default_factory=list)
 
 
 def _fail(field_name: str, problem: str) -> None:
@@ -109,10 +110,18 @@ def load_schema(path: str | Path) -> Schema:
     if not isinstance(default_limit, int) or default_limit < 1:
         raise SchemaError(f"defaults.limit must be a positive integer, got {default_limit}")
 
+    display = raw.get("display", [])
+    if not isinstance(display, list):
+        raise SchemaError("'display' must be a list of field names")
+    for col in display:
+        if not isinstance(col, str):
+            raise SchemaError(f"'display' entries must be strings, got {type(col).__name__}")
+
     return Schema(
         vertical=vertical,
         fields=fields,
         sort_options=sort_options,
         default_sort=default_sort,
         default_limit=default_limit,
+        display=display,
     )

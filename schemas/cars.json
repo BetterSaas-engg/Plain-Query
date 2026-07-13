@@ -43,5 +43,6 @@
   "defaults": {
     "sort": "price_asc",
     "limit": 25
-  }
+  },
+  "display": ["title", "year", "price", "mileage", "color"]
 }

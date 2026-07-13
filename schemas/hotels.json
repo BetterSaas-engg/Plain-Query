@@ -1,0 +1,47 @@
+{
+  "vertical": "hotels",
+  "fields": {
+    "city": {
+      "type": "enum",
+      "values": ["Toronto", "Vancouver", "Montreal", "Calgary", "Ottawa", "Halifax", "Victoria", "Quebec City", "Winnipeg", "Edmonton"]
+    },
+    "neighborhood": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "star_rating": {
+      "type": "int",
+      "min": 1,
+      "max": 5,
+      "operators": ["eq", "gte", "lte", "between"]
+    },
+    "price_per_night": {
+      "type": "int",
+      "unit": "CAD",
+      "min": 0,
+      "operators": ["lte", "gte", "between"]
+    },
+    "guest_rating": {
+      "type": "int",
+      "min": 1,
+      "max": 10,
+      "operators": ["eq", "gte", "lte", "between"]
+    },
+    "property_type": {
+      "type": "enum",
+      "values": ["hotel", "hostel", "resort", "apartment", "bnb"]
+    },
+    "breakfast_included": {
+      "type": "enum",
+      "values": ["yes", "no"]
+    }
+  },
+  "sort": ["price_per_night_asc", "price_per_night_desc", "guest_rating_desc", "star_rating_desc"],
+  "defaults": {
+    "sort": "price_per_night_asc",
+    "limit": 25
+  },
+  "display": ["name", "city", "star_rating", "price_per_night", "guest_rating", "property_type"]
+}

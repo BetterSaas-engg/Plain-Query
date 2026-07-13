@@ -23,6 +23,7 @@ class SearchResult:
     limit: int = 25
     unmapped: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    display: list[str] = field(default_factory=list)
 
 
 def run(query: str, schema_path: str, data_path: str) -> SearchResult:
@@ -42,4 +43,5 @@ def run(query: str, schema_path: str, data_path: str) -> SearchResult:
         limit=vf.limit,
         unmapped=vf.unmapped,
         notes=vf.notes,
+        display=schema.display,
     )
