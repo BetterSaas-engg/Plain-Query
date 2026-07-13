@@ -1,8 +1,10 @@
 """PlainQuery demo API — wraps the real engine for the sales UI."""
 
 import json
+import logging
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -18,12 +20,33 @@ from src.plainquery.translator import translate
 from src.plainquery.validator import validate
 from src.plainquery.backend import search
 from src.plainquery.loosen import suggest, Suggestion
-from src.plainquery.router import load_customer, route
+from src.plainquery.router import load_customer, route, _get_client, MODEL
 
-app = FastAPI(title="PlainQuery Demo")
+logger = logging.getLogger("plainquery")
 
 CUSTOMER_PATH = "customers/expedia.json"
 customer = load_customer(CUSTOMER_PATH)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Warm the Anthropic client connection at startup."""
+    try:
+        t0 = time.perf_counter()
+        client = _get_client()
+        client.messages.create(
+            model=MODEL,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        elapsed = (time.perf_counter() - t0) * 1000
+        logger.info(f"Client warm-up complete ({elapsed:.0f}ms)")
+    except Exception as e:
+        logger.warning(f"Client warm-up failed (non-fatal): {e}")
+    yield
+
+
+app = FastAPI(title="PlainQuery Demo", lifespan=lifespan)
 
 
 class SearchRequest(BaseModel):
