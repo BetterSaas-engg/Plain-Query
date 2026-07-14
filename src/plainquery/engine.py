@@ -32,14 +32,15 @@ class SearchResult:
     available_fields: list[str] = field(default_factory=list)
 
 
-def run(query: str, schema_path: str, data_path: str) -> SearchResult:
-    """Run the full NL → filter → search pipeline."""
-    schema = load_schema(schema_path)
-    data = json.loads(Path(data_path).read_text(encoding="utf-8"))
+def run_from_filter(
+    vf: ValidatedFilter, schema: Schema, data: list[dict]
+) -> SearchResult:
+    """Run the deterministic path from a pre-validated filter. No LLM calls.
 
-    candidate: CandidateFilter = translate(query, schema)
-    vf: ValidatedFilter = validate(candidate, schema)
-
+    This is the cache-hit entry point: the filter was already translated and
+    validated on a previous request, so we skip straight to needs-input checks,
+    search, and loosening.
+    """
     all_fields = [name for name, fd in schema.fields.items() if not fd.essential]
 
     # Precedence: "nothing understood" beats "missing essential"
@@ -93,3 +94,14 @@ def run(query: str, schema_path: str, data_path: str) -> SearchResult:
         display=schema.display,
         suggestions=suggestions,
     )
+
+
+def run(query: str, schema_path: str, data_path: str) -> SearchResult:
+    """Run the full NL → filter → search pipeline."""
+    schema = load_schema(schema_path)
+    data = json.loads(Path(data_path).read_text(encoding="utf-8"))
+
+    candidate: CandidateFilter = translate(query, schema)
+    vf: ValidatedFilter = validate(candidate, schema)
+
+    return run_from_filter(vf, schema, data)

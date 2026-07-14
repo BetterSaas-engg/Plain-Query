@@ -17,15 +17,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.plainquery.schema import load_schema
 from src.plainquery.translator import translate
-from src.plainquery.validator import validate
+from src.plainquery.validator import validate, ValidatedFilter
 from src.plainquery.backend import search
 from src.plainquery.loosen import suggest, Suggestion
+from src.plainquery.engine import run_from_filter
 from src.plainquery.router import load_customer, route, _get_client, MODEL
+from src.plainquery.cache import (
+    LRUFilterCache, CacheEntry, make_cache_key, schema_fingerprint,
+)
 
 logger = logging.getLogger("plainquery")
 
 CUSTOMER_PATH = "customers/expedia.json"
 customer = load_customer(CUSTOMER_PATH)
+_fingerprint = schema_fingerprint(customer.verticals)
+_cache = LRUFilterCache(max_size=1024)
 
 
 @asynccontextmanager
@@ -93,15 +99,73 @@ class SearchResponse(BaseModel):
     search_time_ms: float = 0
     total_time_ms: float = 0
 
+    # Cache
+    cache_hit: bool = False
+    cache_stats: dict = {}
+
 
 @app.post("/api/search", response_model=SearchResponse)
 def api_search(req: SearchRequest):
     total_start = time.perf_counter()
     resp = SearchResponse()
 
+    # --- Cache check: skip router + translator on hit ---
+    explicit_vertical = req.vertical if req.vertical and req.vertical != "all" else None
+    cache_key = make_cache_key(customer.name, _fingerprint, req.query)
+    # For context-provided vertical, include it in the key so "hotels" and "flights"
+    # for the same query text don't collide.
+    if explicit_vertical:
+        cache_key = make_cache_key(
+            customer.name, _fingerprint, f"{explicit_vertical}\x00{req.query}"
+        )
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        # Cache hit — zero LLM calls. Deterministic path only.
+        resp.cache_hit = True
+        resp.routed_vertical = cached.vertical
+        resp.route_mode = "cached"
+        resp.route_confidence = "high"
+
+        schema = load_schema(cached.schema_path)
+        data = json.loads(Path(cached.data_path).read_text(encoding="utf-8"))
+
+        vf = ValidatedFilter(
+            filters=cached.filters,
+            sort=cached.sort,
+            limit=cached.limit,
+            unmapped=list(cached.unmapped),
+            notes=list(cached.notes),
+        )
+
+        t0 = time.perf_counter()
+        result = run_from_filter(vf, schema, data)
+        resp.search_time_ms = (time.perf_counter() - t0) * 1000
+
+        resp.validated_filter = result.validated_filter
+        resp.sort = result.sort
+        resp.limit = result.limit
+        resp.unmapped = result.unmapped
+        resp.notes = result.notes
+        resp.display = result.display
+        resp.rows = result.rows
+        resp.total_matches = result.total_matches
+        resp.needs_input = result.needs_input
+        resp.needs_input_kind = result.needs_input_kind
+        resp.missing_essential = result.missing_essential
+        resp.available_fields = result.available_fields
+        resp.suggestions = [
+            SuggestionOut(field=s.field, change=s.change, match_count=s.match_count)
+            for s in result.suggestions
+        ]
+        resp.total_time_ms = (time.perf_counter() - total_start) * 1000
+        resp.cache_stats = _cache.stats()
+        return resp
+
+    # --- Cache miss: full pipeline (router + translator + validator) ---
+
     # 1. Route
     route_start = time.perf_counter()
-    explicit_vertical = req.vertical if req.vertical and req.vertical != "all" else None
     route_result = route(req.query, customer, vertical=explicit_vertical)
     resp.route_time_ms = (time.perf_counter() - route_start) * 1000
 
@@ -112,6 +176,7 @@ def api_search(req: SearchRequest):
 
     if route_result.vertical is None:
         resp.total_time_ms = (time.perf_counter() - total_start) * 1000
+        resp.cache_stats = _cache.stats()
         return resp
 
     # 2. Load schema + data
@@ -129,51 +194,43 @@ def api_search(req: SearchRequest):
     vf = validate(candidate, schema)
     resp.validate_time_ms = (time.perf_counter() - t0) * 1000
 
+    # Don't cache translation errors — they may be transient (API timeout)
+    if not candidate.error:
+        _cache.put(cache_key, CacheEntry(
+            vertical=route_result.vertical,
+            schema_path=route_result.schema_path,
+            data_path=route_result.data_path,
+            filters=vf.filters,
+            sort=vf.sort,
+            limit=vf.limit,
+            unmapped=list(vf.unmapped),
+            notes=list(vf.notes),
+        ))
+
     resp.validated_filter = vf.filters
     resp.sort = vf.sort
     resp.limit = vf.limit
     resp.unmapped = vf.unmapped
     resp.notes = vf.notes
 
-    # 4b. Check needs_input — precedence: not_understood > missing_essential
-    all_fields = [name for name, fd in schema.fields.items() if not fd.essential]
-
-    if not vf.filters and bool(vf.unmapped):
-        resp.needs_input = True
-        resp.needs_input_kind = "not_understood"
-        resp.available_fields = all_fields
-        resp.total_time_ms = (time.perf_counter() - total_start) * 1000
-        return resp
-
-    missing_essential = [
-        name for name, fd in schema.fields.items()
-        if fd.essential and name not in vf.filters
-    ]
-    if missing_essential:
-        resp.needs_input = True
-        resp.needs_input_kind = "missing_essential"
-        resp.missing_essential = missing_essential
-        resp.available_fields = all_fields
-        resp.total_time_ms = (time.perf_counter() - total_start) * 1000
-        return resp
-
-    # 5. Search (deterministic)
+    # 5. Run deterministic path (needs_input checks + search + loosening)
     t0 = time.perf_counter()
-    rows = search(data, vf, schema)
+    result = run_from_filter(vf, schema, data)
     resp.search_time_ms = (time.perf_counter() - t0) * 1000
 
-    resp.rows = rows
-    resp.total_matches = len(rows)
-
-    # 6. Loosen if zero results
-    if not rows and vf.filters:
-        suggestions = suggest(data, vf, schema)
-        resp.suggestions = [
-            SuggestionOut(field=s.field, change=s.change, match_count=s.match_count)
-            for s in suggestions
-        ]
+    resp.rows = result.rows
+    resp.total_matches = result.total_matches
+    resp.needs_input = result.needs_input
+    resp.needs_input_kind = result.needs_input_kind
+    resp.missing_essential = result.missing_essential
+    resp.available_fields = result.available_fields
+    resp.suggestions = [
+        SuggestionOut(field=s.field, change=s.change, match_count=s.match_count)
+        for s in result.suggestions
+    ]
 
     resp.total_time_ms = (time.perf_counter() - total_start) * 1000
+    resp.cache_stats = _cache.stats()
     return resp
 
 

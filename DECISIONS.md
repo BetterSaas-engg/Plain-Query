@@ -85,9 +85,61 @@ Context-provided routing is first-class (Decision on vertical routing): real cus
 - **Caching search results** rather than filters: rejected. Inventory changes; filters do not.
 - **Building the cache now:** deferred. Pre-customer, this is premature optimization. The requirement at this stage is a *credible answer*, not code — a technical buyer will ask "what's your p99?" and "what does this cost per query?", and the answer above is what that conversation needs.
 
-### Open questions (for when this is built)
+### Open questions (resolved in Decision #24)
 
-- Cache store: in-process (per instance) vs. shared (Redis)? Shared is required for hit rates to hold across horizontally scaled instances.
-- TTL policy, if any — filters do not go stale, but customers may want a ceiling.
-- Do we cache per-customer or globally? (Same sentence + same schema = same filter, so a global cache keyed on schema version is sound — but customers may object to any shared surface. Likely per-customer for the enterprise sale, even at the cost of hit rate.)
-- Measure the real repeat-query rate before promising a hit-rate number to anyone.
+- ~~Cache store~~ → in-process LRU. See #24.
+- ~~TTL policy~~ → none. See #24.
+- ~~Per-customer or global~~ → per-customer. See #24.
+- Measure the real repeat-query rate before promising a hit-rate number to anyone. (Still open — requires production traffic.)
+
+## 24. Filter cache: implemented — in-process LRU, per-customer, no TTL
+
+**Status:** Built and tested. 21 deterministic tests. Cache hit skips both router and translator — zero LLM calls on hit. Measured latency: see README.md performance table.
+
+### What was built
+
+`src/plainquery/cache.py` — an in-process LRU cache behind an abstract `FilterCacheBackend` protocol. The engine, CLI, and API never touch the cache implementation directly; they go through the protocol. A shared store (Redis, Memcached) can drop in by implementing the same interface — no changes to callers or engine.
+
+**Cache hit path:** normalize query → hash key → lookup → reconstruct `ValidatedFilter` → `run_from_filter()` (deterministic search + loosening). Zero LLM calls. The ~10ms path.
+
+**Cache miss path:** route (LLM) → translate (LLM) → validate (deterministic) → store in cache → search. Same as before, plus one cache write.
+
+**Key structure:** `sha256(customer_name + schema_fingerprint + normalized_query)`.
+- `customer_name` — per-customer isolation (see below).
+- `schema_fingerprint` — `sha256` of all schema file contents for the customer. Rotates automatically when any schema file changes.
+- `normalized_query` — lowercased, trimmed, whitespace-collapsed.
+
+### Resolved: store — in-process LRU
+
+In-process `OrderedDict`-based LRU, max 1024 entries (configurable). Simple, zero-dependency, sufficient for single-process and demo.
+
+**Limitation acknowledged:** in-process means each process/instance has its own cache. Hit rates do not hold across horizontally scaled instances. When multi-instance deployment is needed, swap `LRUFilterCache` for a `Redis`-backed implementation of `FilterCacheBackend`. The interface is designed for this — the swap is one line.
+
+### Resolved: TTL — none
+
+A validated filter is a pure function of `(query_text, schema_version)`. The same input always produces the same output. It cannot go stale — the translation is deterministic given the same prompt and schema, and the validator is fully deterministic.
+
+Schema changes are handled by key rotation, not TTL: the `schema_fingerprint` is part of the cache key. When a customer deploys a schema change (new fields, changed enums, removed operators), the fingerprint changes, every existing key becomes a miss, and stale entries are naturally orphaned — they sit in the LRU until evicted, never served.
+
+TTL would add complexity (expiry threads, configuration surface) to solve a problem that doesn't exist. If a customer later demands a ceiling for compliance reasons, adding TTL to the `FilterCacheBackend` interface is trivial.
+
+### Resolved: scope — per-customer keying
+
+Globally-keyed caching would be correct: `(same query + same schema = same filter)` regardless of which customer owns the schema. It would also yield higher hit rates (two customers with identical schemas would share cache entries).
+
+**Rejected in favor of per-customer keying.** Enterprise security teams object to any cross-tenant shared surface, even when the shared data is a search filter derived from a public schema. The objection is not technical — it's organizational. The trade:
+- **Correctness:** neutral. Per-customer produces identical filters to global.
+- **Hit rate:** negative. Two customers with identical schemas maintain separate caches.
+- **Sale:** positive. "Your data never touches another customer's cache" is a sentence that ends the security review faster.
+
+This is a deliberate trade: we lose some cache efficiency to remove a sales objection. The hit-rate cost is marginal (most customers have unique schemas anyway), and the sales cost of the alternative is real.
+
+### What is NOT cached
+
+- **Search results.** Inventory changes; filters do not. (Unchanged from #23.)
+- **Translation errors.** A failed API call may be transient. Caching the failure would serve a bad result on retry.
+- **Ambiguous routing.** If the router can't classify a query, that's not cached — the user will re-submit with a vertical hint, which is a different cache key.
+
+### Engine changes
+
+`engine.py` now exposes `run_from_filter(vf, schema, data)` — the deterministic-only entry point that cache hits use. `run()` (the full pipeline) calls `run_from_filter` internally after translation and validation. No duplication.
