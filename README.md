@@ -8,11 +8,13 @@ The LLM only translates. It produces a candidate filter that may be wrong. A det
 
 ```
 query
+  -> [Cache]         check for cached filter (hit = skip to search, ~7ms)
   -> [Router]        pick the vertical (or refuse if ambiguous)
   -> [Translator]    NL -> candidate filter (one LLM call)
   -> [Validator]     deterministic: enforce schema, drop bad fields, fail closed
   -> [Search]        deterministic: filter, sort, limit against the dataset
-  -> results + the filter used + what was dropped and why
+  -> results + reviewable filter + what was dropped and why
+         \-> [Review/Edit] user adjusts -> re-validate -> search again
 ```
 
 ## Schema-agnostic — and here's the proof
@@ -90,12 +92,12 @@ Try loosening your search:
 - **Dates are emitted, not matched.** PlainQuery translates date filters (check-in, departure, pickup) and includes them in the validated output. Matching against real availability calendars is the customer's system's job — we don't model inventory.
 - **No bool type.** The schema supports `enum`, `string`, `int`, and `date`. Two verticals needed booleans (`breakfast_included`, `unlimited_mileage`), both worked around as `enum ["yes", "no"]`. A first-class `bool` type is an open item.
 - **Synthetic demo data.** The four datasets (~2,000 rows each) are seeded synthetic data for demonstration. Real deployments would connect to the customer's catalog.
-- **The filter cache is designed but not built.** [Decision #23](DECISIONS.md) describes caching validated filters keyed on `(normalized_query, schema_version)` to eliminate the LLM call on repeat queries. It is not yet implemented — there is no customer traffic to justify it. The cache hit rate must be measured, not promised.
+- **Filter cache is in-process LRU.** The [cache](DECISIONS.md) eliminates the LLM call on repeat queries (hit ≈ 7ms, miss ≈ 1600ms measured). In-process means hit rates do not hold across horizontally scaled instances — a shared backend (Redis) is required for that. The actual hit rate depends on the customer's repeat-query distribution and must be measured, not assumed.
 - **Unmapped completeness is prompt-enforced, not deterministic.** The translator is instructed to report every term it couldn't map, but nothing guarantees completeness. Mitigated by an explicit accounting rule; the gap is reduced but soft.
 
 ## Performance and cost
 
-Measured on the demo (Haiku model, single-instance, no cache):
+Measured on the demo (Haiku model, single-instance):
 
 | Layer | Latency |
 |-------|---------|
@@ -104,6 +106,7 @@ Measured on the demo (Haiku model, single-instance, no cache):
 | Validator (deterministic) | < 1ms |
 | Search (deterministic) | < 15ms |
 | Loosening (deterministic) | < 50ms |
+| **Cache hit (full path)** | **≈ 7ms** |
 
 All latency and cost live in the model calls. The deterministic layers are stateless pure functions.
 
@@ -133,13 +136,30 @@ python cli.py "red Honda Civic under 25k, low mileage"
 python cli.py "cheap hostel in Toronto" --customer customers/expedia.json
 python cli.py "flight to Lisbon in June under 900" --customer customers/expedia.json
 
+# Cache benchmark (miss then hit, shows measured latency)
+python cli.py "SUV rental in Calgary" --customer customers/expedia.json --vertical car_rentals --bench
+
 # Demo UI
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 # Open http://127.0.0.1:8000
 
-# Tests (44 tests, all deterministic, no LLM calls)
+# Tests (91 tests, all deterministic, no LLM calls)
 python -m pytest -v
 ```
+
+## Review and edit — the filter is a reviewable, editable artifact
+
+The validated filter is a first-class API output, not an internal detail. Every search response includes a structured `review` object with:
+
+- **Per-field what-we-understood** — each filter field paired with its schema context (type, enum options, valid operators, numeric range, unit). Everything a UI needs to render an editable form.
+- **Unmapped terms** — what we couldn't map to any field.
+- **Dropped fields with reasons** — what the validator rejected and why.
+- **Status** — `ready`, `missing_essential`, or `not_understood`.
+- **Available fields** — schema fields not yet in the filter, for "add a filter" UI.
+
+The customer builds a review step in their own UI. When the user edits a field and submits, the edited filter goes through the **re-validation endpoint** (`POST /api/search/edit`). This is the same fail-closed validator that sits between the LLM and search — a user editing "price ≤ 25000" to "price ≤ banana" is caught identically to an LLM hallucinating it. No edited filter reaches the search without re-validation.
+
+The demo includes a [reference implementation](app/static/index.html) of this flow: an editable form rendered from the `review` object, with dropdowns for enums, operator pickers for numeric/date fields, and an "Apply Changes" button that calls the edit endpoint. It is labeled as a reference pattern — the customer replaces it with their own design system.
 
 ## Repo map
 
@@ -149,16 +169,19 @@ src/plainquery/
   translator.py    NL -> candidate filter via one LLM call. Does NOT validate.
   validator.py     Deterministic middleware. Enforces schema, drops bad fields, fails closed.
   backend.py       Reference in-memory search. Filter, sort, limit. Customer replaces this.
-  engine.py        Pipeline orchestrator. Wires translate -> validate -> search. Checks essential fields.
+  engine.py        Pipeline orchestrator. Wires translate -> validate -> search -> review.
   loosen.py        Zero-results suggestions. Deterministic: tries relaxations, reports real match counts.
   router.py        Vertical routing. Context-provided (no LLM) or inferred (one LLM call, fail-closed).
+  cache.py         Filter cache. Per-customer LRU, schema-fingerprint invalidation.
+  adapters/
+    sql.py         SQL adapter. Validated filter -> parameterized SELECT + params.
 
 schemas/           Declarative schema files (cars, hotels, flights, car_rentals).
 data/              Synthetic datasets (~2,000 rows each, seeded generators in scripts/).
 customers/         Customer configs mapping verticals to schemas + data.
-app/               FastAPI demo app + single-page frontend.
-cli.py             CLI entry point.
-tests/             44 deterministic tests (validator, loosen, router, engine behavior).
+app/               FastAPI demo app + single-page frontend with review/edit reference UI.
+cli.py             CLI entry point (includes --bench for cache hit/miss latency).
+tests/             91 deterministic tests (validator, cache, edit, sql adapter, loosen, router, schema).
 ```
 
 See [SPEC.md](SPEC.md) for the original build spec and [DECISIONS.md](DECISIONS.md) for every architectural decision and its rationale.
