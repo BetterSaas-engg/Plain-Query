@@ -105,7 +105,15 @@ Measured on the demo (Haiku model, single-instance, no cache):
 | Search (deterministic) | < 15ms |
 | Loosening (deterministic) | < 50ms |
 
-All latency and cost live in the model calls. The deterministic layers are stateless pure functions. The [cache design](DECISIONS.md) eliminates the LLM call entirely on repeat queries — converting cost from per-query to per-unique-query. The repeat-query rate in production must be measured before quoting a hit-rate number.
+All latency and cost live in the model calls. The deterministic layers are stateless pure functions.
+
+**Two independent cost levers** ([details in DECISIONS.md](DECISIONS.md)):
+
+1. **PlainQuery filter cache** eliminates the LLM call entirely on repeat queries (cache hit ≈ 7ms measured, zero tokens). Converts cost from per-query to per-unique-query. The savings scale with the customer's repeat-query rate, which must be measured against production traffic.
+
+2. **Anthropic prompt caching** reduces the token cost of cache *misses* (where the LLM call still happens). The translator's system prompt (schema, field definitions, rules) is identical across all queries for a vertical. Anthropic caches this prefix and bills reuse at ~10% of the standard input rate (5-min/1-hr TTL, 1.25x–2x write premium on population). Requires sustained traffic to keep the provider cache warm — applies at production volume, not low-traffic demos.
+
+These levers are orthogonal: lever 1 controls *how many* LLM calls happen, lever 2 controls *what each call costs*. Neither should be quoted as a combined discount — both depend on the customer's traffic pattern and must be measured independently.
 
 ## Running it
 

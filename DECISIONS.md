@@ -140,6 +140,18 @@ This is a deliberate trade: we lose some cache efficiency to remove a sales obje
 - **Translation errors.** A failed API call may be transient. Caching the failure would serve a bad result on retry.
 - **Ambiguous routing.** If the router can't classify a query, that's not cached — the user will re-submit with a vertical hint, which is a different cache key.
 
+### Two independent cost levers
+
+The system has two independent mechanisms that reduce LLM cost. They are not additive in a simple way — each applies to a different subset of traffic — and neither should be quoted as a single combined-savings number. Both must be measured against production traffic.
+
+**Lever 1: PlainQuery filter cache (ours).** Eliminates the LLM call entirely on repeat queries. A cache hit costs zero tokens. The savings scale with the customer's repeat-query rate, which follows a power law in real search traffic but must be measured, not assumed.
+
+**Lever 2: Anthropic prompt caching (provider-side).** The translator's system prompt is identical for every query within a vertical — it contains the schema, field definitions, rules, and output format. On a PlainQuery cache *miss* (where the LLM call actually happens), Anthropic's prompt caching can serve the schema-prefix portion from their cache at ~10% of the standard input token rate. Write premium is 1.25x (5-min TTL) to 2x (1-hr TTL) on the first request that populates the cache. This reduces the per-miss cost, not the per-hit cost (hits don't call the LLM at all).
+
+**Caveat:** Prompt-cache savings require sustained traffic to keep Anthropic's cache warm within the TTL window. At production volume with steady query flow, the prompt cache stays warm and nearly every miss benefits. At low-traffic or bursty volumes, the prompt cache expires between requests and the savings don't materialize. This lever applies at scale, not during demos.
+
+**How they compose:** Lever 1 determines *how many* LLM calls happen (repeat-query rate). Lever 2 determines *what each call costs* (prompt-cache hit rate at the provider). They are orthogonal — improving one does not affect the other. A customer's total cost depends on both their repeat-query distribution and their traffic volume/steadiness. Quote them as separate levers to be measured, not as a combined discount.
+
 ### Engine changes
 
 `engine.py` now exposes `run_from_filter(vf, schema, data)` — the deterministic-only entry point that cache hits use. `run()` (the full pipeline) calls `run_from_filter` internally after translation and validation. No duplication.
