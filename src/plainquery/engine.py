@@ -80,6 +80,15 @@ def build_filter_review(
             continue
         review_fields.append(_review_field(fname, constraint, fd))
 
+    # Include missing essential fields as empty entries so the UI can render
+    # them as required-empty inputs (date pickers, etc.) without a separate
+    # prompt screen.
+    for ename in (missing_essential or []):
+        if ename not in vf.filters:
+            fd = schema.fields.get(ename)
+            if fd is not None:
+                review_fields.append(_review_field(ename, "", fd))
+
     all_fields = [name for name, fd in schema.fields.items() if not fd.essential]
 
     status = "ready"

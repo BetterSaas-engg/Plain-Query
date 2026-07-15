@@ -577,6 +577,41 @@
     color: var(--blue-600);
   }
 
+  .review-field-required {
+    border: 2px solid var(--orange-500);
+    border-radius: 8px;
+    padding: 10px;
+    background: #fffbeb;
+  }
+  .review-required-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    background: var(--orange-500);
+    color: white;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    font-style: normal;
+  }
+  .review-required-hint {
+    font-size: 12px;
+    color: var(--orange-500);
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+  .review-apply-btn:disabled {
+    background: var(--gray-300);
+    cursor: not-allowed;
+  }
+  .review-blocked-reason {
+    font-size: 12px;
+    color: var(--orange-500);
+    font-weight: 500;
+  }
+
   /* Loading */
   .loading {
     text-align: center;
@@ -730,16 +765,24 @@ function renderResults(data) {
     return;
   }
 
-  // Needs input — missing essential fields or empty filter with unmapped
-  if (data.needs_input) {
+  // not_understood — nothing mapped at all, no fields to review
+  if (data.needs_input && data.needs_input_kind === 'not_understood') {
     panel.innerHTML = renderNeedsInput(data);
     return;
   }
 
+  // missing_essential falls through to the review panel — no separate prompt
+
   let html = '';
 
-  // Review/edit panel (always shown when review data exists)
+  // Review/edit panel (shown whenever we mapped at least one field)
   html += renderReviewPanel(data);
+
+  // missing_essential: panel is enough — don't show empty results below it
+  if (data.needs_input && data.needs_input_kind === 'missing_essential') {
+    panel.innerHTML = html;
+    return;
+  }
 
   // Status bar
   html += '<div class="status-bar">';
@@ -1061,22 +1104,83 @@ function renderReviewPanel(data) {
   } else {
     html += '<div></div>';
   }
-  html += `<div style="display:flex;align-items:center;gap:12px;">
+  const hasEssentialMissing = review.missing_essential && review.missing_essential.length > 0;
+  html += `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
     <div class="review-status">
       <span class="review-status-indicator ${review.status === 'ready' ? 'ready' : review.status === 'not_understood' ? 'not-understood' : 'needs-input'}"></span>
-      ${review.status === 'ready' ? 'Ready to search' : review.status === 'not_understood' ? 'Nothing understood' : 'Missing required fields'}
+      ${review.status === 'ready' ? 'Ready to search' : review.status === 'not_understood' ? 'Nothing understood' : 'Fill required fields to search'}
     </div>
-    <button class="review-apply-btn" onclick="applyEdit()">Apply Changes</button>
+    <button class="review-apply-btn" id="reviewApplyBtn" onclick="applyEdit()">Apply &amp; Search</button>
   </div>`;
   html += '</div>';  // .review-actions
 
   html += '</div>';  // .review-panel
+
+  // After rendering, gate the Apply button and attach input listeners
+  // (deferred via setTimeout since the DOM isn't updated yet when this returns)
+  setTimeout(updateApplyGate, 0);
+  setTimeout(() => {
+    document.querySelectorAll('.review-field input, .review-field select').forEach(el => {
+      el.addEventListener('input', updateApplyGate);
+      el.addEventListener('change', updateApplyGate);
+    });
+  }, 0);
+
   return html;
 }
 
+function updateApplyGate() {
+  const btn = document.getElementById('reviewApplyBtn');
+  if (!btn) return;
+  const essentialFields = document.querySelectorAll('.review-field[data-essential="true"]');
+  let allFilled = true;
+  essentialFields.forEach(fieldEl => {
+    const ftype = fieldEl.dataset.type;
+    let filled = false;
+    if (ftype === 'date' || ftype === 'int') {
+      const opSel = fieldEl.querySelector('[data-rf-op]');
+      const op = opSel ? opSel.value : 'eq';
+      if (op === 'between') {
+        const low = fieldEl.querySelector('[data-rf-low]');
+        const high = fieldEl.querySelector('[data-rf-high]');
+        filled = low && high && low.value !== '' && high.value !== '';
+      } else {
+        const inp = fieldEl.querySelector('input[data-rf]');
+        filled = inp && inp.value !== '';
+      }
+    } else {
+      const inp = fieldEl.querySelector('input[data-rf], select[data-rf]');
+      filled = inp && inp.value !== '';
+    }
+    if (!filled) allFilled = false;
+    // Toggle visual required state
+    fieldEl.classList.toggle('review-field-required', !filled);
+    const hint = fieldEl.querySelector('.review-required-hint');
+    if (hint) hint.style.display = filled ? 'none' : '';
+  });
+  btn.disabled = !allFilled;
+  // Update status text
+  const statusEl = btn.closest('.review-actions')?.querySelector('.review-status');
+  if (statusEl) {
+    const indicator = statusEl.querySelector('.review-status-indicator');
+    if (allFilled) {
+      if (indicator) { indicator.className = 'review-status-indicator ready'; }
+      statusEl.lastChild.textContent = ' Ready to search';
+    } else {
+      if (indicator) { indicator.className = 'review-status-indicator needs-input'; }
+      statusEl.lastChild.textContent = ' Fill required fields to search';
+    }
+  }
+}
+
 function renderReviewField(f) {
-  let html = `<div class="review-field" data-field="${esc(f.name)}" data-type="${esc(f.type)}">`;
-  html += `<label>${friendlyLabel(f.name)}<span class="review-field-type">${f.type}${f.unit ? ' (' + f.unit + ')' : ''}</span></label>`;
+  const isEmpty = f.value === '' || f.value === null || f.value === undefined;
+  const requiredEmpty = f.essential && isEmpty;
+  let html = `<div class="review-field${requiredEmpty ? ' review-field-required' : ''}" data-field="${esc(f.name)}" data-type="${esc(f.type)}" data-essential="${f.essential ? 'true' : 'false'}">`;
+  html += `<label>${friendlyLabel(f.name)}<span class="review-field-type">${f.type}${f.unit ? ' (' + f.unit + ')' : ''}</span>${f.essential ? '<span class="review-required-badge">Required</span>' : ''}</label>`;
+  if (requiredEmpty) {
+    html += '<div class="review-required-hint">Required &mdash; needs a value</div>';
+  }
 
   if (f.type === 'enum') {
     html += `<select data-rf="${esc(f.name)}">

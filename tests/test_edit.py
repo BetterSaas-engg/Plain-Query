@@ -180,3 +180,66 @@ def test_edit_matches_validator_behavior(schema, data):
     # Same validator → same notes
     assert result.notes == vf.notes
     assert result.validated_filter == vf.filters
+
+
+# === Missing essential fields in review ===
+
+
+@pytest.fixture
+def car_rentals_schema():
+    return load_schema("schemas/car_rentals.json")
+
+
+@pytest.fixture
+def car_rentals_data():
+    return json.loads(open("data/car_rentals.json", encoding="utf-8").read())
+
+
+def test_missing_essential_review_includes_essential_fields(
+    car_rentals_schema, car_rentals_data
+):
+    """A missing_essential result includes empty essential fields in the review
+    so the UI can render them as required-empty inputs."""
+    result = run_from_edit(
+        {"pickup_city": "Calgary", "vehicle_class": "suv"},
+        car_rentals_schema, car_rentals_data,
+    )
+    assert result.needs_input is True
+    assert result.needs_input_kind == "missing_essential"
+    assert result.review is not None
+    assert result.review.status == "missing_essential"
+
+    field_names = [f.name for f in result.review.fields]
+    # Mapped fields present
+    assert "pickup_city" in field_names
+    assert "vehicle_class" in field_names
+    # Essential fields present as empty entries
+    assert "pickup_date" in field_names
+    assert "dropoff_date" in field_names
+
+    # Essential fields have correct metadata
+    pickup = next(f for f in result.review.fields if f.name == "pickup_date")
+    assert pickup.type == "date"
+    assert pickup.essential is True
+    assert pickup.value == ""  # empty — needs user input
+    assert "eq" in pickup.operators or "gte" in pickup.operators
+
+
+def test_filling_essential_fields_produces_results(
+    car_rentals_schema, car_rentals_data
+):
+    """Filling the essential fields via the edit path lets the search run."""
+    result = run_from_edit(
+        {
+            "pickup_city": "Calgary",
+            "vehicle_class": "suv",
+            "pickup_date": {"op": "eq", "value": "2026-08-01"},
+            "dropoff_date": {"op": "eq", "value": "2026-08-05"},
+        },
+        car_rentals_schema, car_rentals_data,
+    )
+    # Engine no longer blocks — search runs
+    assert result.needs_input is False
+    assert result.review is not None
+    assert result.review.status == "ready"
+    assert result.review.missing_essential == []
