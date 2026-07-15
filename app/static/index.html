@@ -405,6 +405,178 @@
     margin: 2px 4px 2px 0;
   }
 
+  /* Review/Edit panel — reference implementation */
+  .review-panel {
+    background: white;
+    border: 2px solid var(--blue-600);
+    border-radius: 12px;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .review-header {
+    padding: 14px 20px;
+    background: var(--blue-50);
+    border-bottom: 1px solid var(--blue-100);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .review-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--blue-700);
+  }
+  .reference-label {
+    font-size: 11px;
+    color: var(--gray-500);
+    font-style: italic;
+  }
+  .review-body {
+    padding: 16px 20px;
+  }
+  .review-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+  }
+  .review-field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--gray-500);
+    margin-bottom: 4px;
+  }
+  .review-field-type {
+    font-size: 10px;
+    color: var(--gray-400);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    margin-left: 4px;
+  }
+  .review-field select,
+  .review-field input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    font-size: 14px;
+    color: var(--gray-900);
+    background: white;
+  }
+  .review-field select:focus,
+  .review-field input:focus {
+    outline: none;
+    border-color: var(--blue-600);
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.15);
+  }
+  .review-int-row {
+    display: flex;
+    gap: 6px;
+  }
+  .review-int-row select {
+    width: 80px;
+    flex-shrink: 0;
+  }
+  .review-int-row input { flex: 1; }
+  .review-range-hint {
+    font-size: 11px;
+    color: var(--gray-400);
+    margin-top: 2px;
+  }
+  .review-sort-row {
+    padding-top: 14px;
+    border-top: 1px solid var(--gray-100);
+    margin-top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .review-sort-row label {
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+  .review-sort-row select {
+    padding: 8px 10px;
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    font-size: 14px;
+    color: var(--gray-900);
+  }
+  .review-actions {
+    padding: 14px 20px;
+    background: var(--gray-50);
+    border-top: 1px solid var(--gray-100);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .review-apply-btn {
+    padding: 10px 24px;
+    background: var(--blue-600);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .review-apply-btn:hover { background: var(--blue-700); }
+  .review-apply-btn:disabled { background: var(--gray-300); cursor: wait; }
+  .review-dropped {
+    font-size: 12px;
+    color: var(--orange-500);
+  }
+  .review-unmapped {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--gray-500);
+  }
+  .review-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .review-status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .review-status-indicator.ready { background: var(--green-600); }
+  .review-status-indicator.needs-input { background: var(--orange-500); }
+  .review-status-indicator.not-understood { background: var(--red-500); }
+  .review-add-row {
+    padding-top: 10px;
+    margin-top: 10px;
+    border-top: 1px solid var(--gray-100);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .review-add-btn {
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px dashed var(--gray-300);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--gray-500);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .review-add-btn:hover {
+    border-color: var(--blue-600);
+    color: var(--blue-600);
+  }
+
   /* Loading */
   .loading {
     text-align: center;
@@ -565,6 +737,9 @@ function renderResults(data) {
   }
 
   let html = '';
+
+  // Review/edit panel (always shown when review data exists)
+  html += renderReviewPanel(data);
 
   // Status bar
   html += '<div class="status-bar">';
@@ -816,6 +991,271 @@ function renderDebug(data, panel) {
   </div>`;
 
   panel.innerHTML = html;
+}
+
+// Review/Edit panel — reference implementation
+// This is a reference pattern showing how a customer can build a review/edit
+// step on top of PlainQuery's reviewable filter API. The customer's own UI
+// would replace this with their design system. The contract is:
+// 1. Read the `review` object from the search response
+// 2. Render editable fields using the schema context (enum_values, operators, ranges)
+// 3. On apply, POST the edited filter to /api/search/edit for re-validation
+// 4. The edit endpoint runs the same fail-closed validator — no bad data reaches search
+
+function renderReviewPanel(data) {
+  const review = data.review;
+  if (!review) return '';
+
+  let html = '<div class="review-panel">';
+  html += `<div class="review-header">
+    <span class="review-title">Here's what we understood &mdash; adjust before searching</span>
+    <span class="reference-label">Reference implementation &mdash; build this in your own UI</span>
+  </div>`;
+
+  html += '<div class="review-body">';
+  html += '<div class="review-fields">';
+
+  for (const f of review.fields) {
+    html += renderReviewField(f);
+  }
+
+  html += '</div>';  // .review-fields
+
+  // Sort
+  if (review.sort_options && review.sort_options.length > 0) {
+    html += `<div class="review-sort-row">
+      <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);">Sort by</label>
+      <select id="reviewSort">
+        ${review.sort_options.map(s => `<option value="${esc(s)}" ${s === review.sort ? 'selected' : ''}>${friendlySort(s)}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  // Add field
+  const usedFields = new Set(review.fields.map(f => f.name));
+  const addable = (review.available_fields || []).filter(f => !usedFields.has(f));
+  if (addable.length > 0) {
+    html += `<div class="review-add-row">
+      <select id="reviewAddField">
+        <option value="">Add a filter...</option>
+        ${addable.map(f => `<option value="${esc(f)}">${friendlyLabel(f)}</option>`).join('')}
+      </select>
+      <button class="review-add-btn" onclick="addReviewField()">+ Add</button>
+    </div>`;
+  }
+
+  // Unmapped
+  if (review.unmapped && review.unmapped.length > 0) {
+    html += `<div class="review-unmapped">
+      Could not map: ${review.unmapped.map(t => `<span class="unmapped-chip">${esc(t)}</span>`).join('')}
+    </div>`;
+  }
+
+  html += '</div>';  // .review-body
+
+  // Actions
+  html += '<div class="review-actions">';
+  // Dropped notes
+  if (review.dropped && review.dropped.length > 0) {
+    html += `<div class="review-dropped">${review.dropped.map(d => esc(d)).join('<br>')}</div>`;
+  } else {
+    html += '<div></div>';
+  }
+  html += `<div style="display:flex;align-items:center;gap:12px;">
+    <div class="review-status">
+      <span class="review-status-indicator ${review.status === 'ready' ? 'ready' : review.status === 'not_understood' ? 'not-understood' : 'needs-input'}"></span>
+      ${review.status === 'ready' ? 'Ready to search' : review.status === 'not_understood' ? 'Nothing understood' : 'Missing required fields'}
+    </div>
+    <button class="review-apply-btn" onclick="applyEdit()">Apply Changes</button>
+  </div>`;
+  html += '</div>';  // .review-actions
+
+  html += '</div>';  // .review-panel
+  return html;
+}
+
+function renderReviewField(f) {
+  let html = `<div class="review-field" data-field="${esc(f.name)}" data-type="${esc(f.type)}">`;
+  html += `<label>${friendlyLabel(f.name)}<span class="review-field-type">${f.type}${f.unit ? ' (' + f.unit + ')' : ''}</span></label>`;
+
+  if (f.type === 'enum') {
+    html += `<select data-rf="${esc(f.name)}">
+      <option value="">(any)</option>
+      ${f.enum_values.map(v => `<option value="${esc(v)}" ${v === f.value ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+    </select>`;
+  } else if (f.type === 'string') {
+    html += `<input type="text" data-rf="${esc(f.name)}" value="${esc(String(f.value || ''))}">`;
+  } else if (f.type === 'int') {
+    const op = (typeof f.value === 'object' && f.value) ? f.value.op : 'eq';
+    const val = (typeof f.value === 'object' && f.value) ? (f.value.value ?? '') : '';
+    const low = (typeof f.value === 'object' && f.value && f.value.op === 'between') ? (f.value.low ?? '') : '';
+    const high = (typeof f.value === 'object' && f.value && f.value.op === 'between') ? (f.value.high ?? '') : '';
+    const ops = f.operators && f.operators.length > 0 ? f.operators : ['eq','lte','gte','between'];
+
+    html += `<div class="review-int-row">
+      <select data-rf-op="${esc(f.name)}" onchange="toggleBetween(this)">
+        ${ops.map(o => `<option value="${o}" ${o === op ? 'selected' : ''}>${opLabel(o)}</option>`).join('')}
+      </select>
+      <input type="number" data-rf="${esc(f.name)}" value="${op !== 'between' ? val : ''}"
+             class="${op === 'between' ? 'hidden' : ''}"
+             ${f.min != null ? 'min="'+f.min+'"' : ''} ${f.max != null ? 'max="'+f.max+'"' : ''}>
+      <input type="number" data-rf-low="${esc(f.name)}" value="${low}" placeholder="from"
+             class="${op !== 'between' ? 'hidden' : ''}"
+             ${f.min != null ? 'min="'+f.min+'"' : ''} ${f.max != null ? 'max="'+f.max+'"' : ''}>
+      <input type="number" data-rf-high="${esc(f.name)}" value="${high}" placeholder="to"
+             class="${op !== 'between' ? 'hidden' : ''}"
+             ${f.min != null ? 'min="'+f.min+'"' : ''} ${f.max != null ? 'max="'+f.max+'"' : ''}>
+    </div>`;
+    let hint = '';
+    if (f.min != null || f.max != null) {
+      hint = 'Range: ' + (f.min ?? '') + ' – ' + (f.max ?? 'no limit');
+    }
+    if (hint) html += `<div class="review-range-hint">${hint}</div>`;
+
+  } else if (f.type === 'date') {
+    const op = (typeof f.value === 'object' && f.value) ? f.value.op : 'eq';
+    const val = (typeof f.value === 'object' && f.value) ? (f.value.value ?? '') : '';
+    const low = (typeof f.value === 'object' && f.value && f.value.op === 'between') ? (f.value.low ?? '') : '';
+    const high = (typeof f.value === 'object' && f.value && f.value.op === 'between') ? (f.value.high ?? '') : '';
+    const ops = f.operators && f.operators.length > 0 ? f.operators : ['eq','gte','lte','between'];
+
+    html += `<div class="review-int-row">
+      <select data-rf-op="${esc(f.name)}" onchange="toggleBetween(this)">
+        ${ops.map(o => `<option value="${o}" ${o === op ? 'selected' : ''}>${opLabel(o)}</option>`).join('')}
+      </select>
+      <input type="date" data-rf="${esc(f.name)}" value="${op !== 'between' ? val : ''}"
+             class="${op === 'between' ? 'hidden' : ''}">
+      <input type="date" data-rf-low="${esc(f.name)}" value="${low}" placeholder="from"
+             class="${op !== 'between' ? 'hidden' : ''}">
+      <input type="date" data-rf-high="${esc(f.name)}" value="${high}" placeholder="to"
+             class="${op !== 'between' ? 'hidden' : ''}">
+    </div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function toggleBetween(sel) {
+  const row = sel.closest('.review-int-row');
+  const isBetween = sel.value === 'between';
+  row.querySelector('[data-rf]').classList.toggle('hidden', isBetween);
+  const lowEl = row.querySelector('[data-rf-low]');
+  const highEl = row.querySelector('[data-rf-high]');
+  if (lowEl) lowEl.classList.toggle('hidden', !isBetween);
+  if (highEl) highEl.classList.toggle('hidden', !isBetween);
+}
+
+function addReviewField() {
+  const sel = document.getElementById('reviewAddField');
+  const fname = sel.value;
+  if (!fname || !lastResponse || !lastResponse.review) return;
+
+  // Find the field's schema info from available_fields + schema context
+  // We need the schema metadata. Since we don't have it for unset fields,
+  // we'll re-search with the current edits to get an updated review.
+  // For now, just add a text input — the validator will catch type mismatches.
+  const container = document.querySelector('.review-fields');
+  const div = document.createElement('div');
+  div.className = 'review-field';
+  div.dataset.field = fname;
+  div.dataset.type = 'string';
+  div.innerHTML = `<label>${friendlyLabel(fname)}<span class="review-field-type">added</span></label>
+    <input type="text" data-rf="${fname}" value="" placeholder="Enter value...">`;
+  container.appendChild(div);
+
+  // Remove from dropdown
+  const opt = sel.querySelector(`option[value="${fname}"]`);
+  if (opt) opt.remove();
+  sel.value = '';
+}
+
+async function applyEdit() {
+  if (!lastResponse || !lastResponse.routed_vertical) return;
+
+  const filters = {};
+
+  // Read all review fields
+  document.querySelectorAll('.review-field').forEach(fieldEl => {
+    const fname = fieldEl.dataset.field;
+    const ftype = fieldEl.dataset.type;
+
+    if (ftype === 'enum') {
+      const val = fieldEl.querySelector('select[data-rf]').value;
+      if (val) filters[fname] = val;
+    } else if (ftype === 'string') {
+      const val = fieldEl.querySelector('input[data-rf]').value.trim();
+      if (val) filters[fname] = val;
+    } else if (ftype === 'int') {
+      const opSel = fieldEl.querySelector('[data-rf-op]');
+      const op = opSel ? opSel.value : 'eq';
+      if (op === 'between') {
+        const low = fieldEl.querySelector('[data-rf-low]').value;
+        const high = fieldEl.querySelector('[data-rf-high]').value;
+        if (low !== '' && high !== '') {
+          filters[fname] = { op: 'between', low: parseInt(low), high: parseInt(high) };
+        }
+      } else {
+        const val = fieldEl.querySelector('input[data-rf]').value;
+        if (val !== '') {
+          filters[fname] = { op, value: parseInt(val) };
+        }
+      }
+    } else if (ftype === 'date') {
+      const opSel = fieldEl.querySelector('[data-rf-op]');
+      const op = opSel ? opSel.value : 'eq';
+      if (op === 'between') {
+        const low = fieldEl.querySelector('[data-rf-low]').value;
+        const high = fieldEl.querySelector('[data-rf-high]').value;
+        if (low && high) {
+          filters[fname] = { op: 'between', low, high };
+        }
+      } else {
+        const val = fieldEl.querySelector('input[data-rf]').value;
+        if (val) {
+          filters[fname] = { op, value: val };
+        }
+      }
+    }
+  });
+
+  const sortEl = document.getElementById('reviewSort');
+  const sort = sortEl ? sortEl.value : null;
+
+  const btn = document.querySelector('.review-apply-btn');
+  btn.disabled = true;
+  btn.textContent = 'Validating...';
+
+  try {
+    const resp = await fetch('/api/search/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        vertical: lastResponse.routed_vertical,
+        filters,
+        sort,
+      }),
+    });
+    lastResponse = await resp.json();
+    renderResults(lastResponse);
+  } catch (e) {
+    document.getElementById('resultsPanel').innerHTML =
+      '<div class="zero-results"><h3>Something went wrong. Please try again.</h3></div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Apply Changes';
+  }
+}
+
+function opLabel(op) {
+  return { eq: '=', lte: '\u2264', gte: '\u2265', between: 'between' }[op] || op;
+}
+
+function friendlySort(s) {
+  const parts = s.rsplit ? s.split('_') : s.split('_');
+  const dir = parts.pop();
+  const field = parts.join(' ');
+  return friendlyLabel(field) + (dir === 'asc' ? ' (low first)' : ' (high first)');
 }
 
 // Helpers
