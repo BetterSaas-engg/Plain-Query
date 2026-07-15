@@ -20,7 +20,7 @@ from src.plainquery.translator import translate
 from src.plainquery.validator import validate, ValidatedFilter
 from src.plainquery.backend import search
 from src.plainquery.loosen import suggest, Suggestion
-from src.plainquery.engine import run_from_filter
+from src.plainquery.engine import run_from_filter, run_from_edit, FilterReview, ReviewField
 from src.plainquery.router import load_customer, route, _get_client, MODEL
 from src.plainquery.cache import (
     LRUFilterCache, CacheEntry, make_cache_key, schema_fingerprint,
@@ -66,6 +66,36 @@ class SuggestionOut(BaseModel):
     match_count: int
 
 
+class ReviewFieldOut(BaseModel):
+    name: str
+    type: str
+    value: str | dict = ""
+    enum_values: list[str] = []
+    operators: list[str] = []
+    min: int | None = None
+    max: int | None = None
+    unit: str | None = None
+    essential: bool = False
+
+
+class FilterReviewOut(BaseModel):
+    """Structured reviewable filter — first-class API output.
+
+    Everything an API consumer needs to build a review/edit step:
+    per-field what-we-understood with schema context, unmapped terms,
+    dropped fields with reasons, and search-readiness status.
+    """
+    fields: list[ReviewFieldOut] = []
+    sort: str = ""
+    sort_options: list[str] = []
+    limit: int = 25
+    unmapped: list[str] = []
+    dropped: list[str] = []       # Validator notes — each explains a rejection
+    status: str = "ready"         # "ready" | "needs_input" | "not_understood"
+    missing_essential: list[str] = []
+    available_fields: list[str] = []
+
+
 class SearchResponse(BaseModel):
     # Routing
     routed_vertical: str | None = None
@@ -80,6 +110,9 @@ class SearchResponse(BaseModel):
     unmapped: list[str] = []
     notes: list[str] = []
     display: list[str] = []
+
+    # Reviewable filter — structured for customer review/edit flows
+    review: FilterReviewOut | None = None
 
     # Results
     rows: list[dict] = []
@@ -102,6 +135,29 @@ class SearchResponse(BaseModel):
     # Cache
     cache_hit: bool = False
     cache_stats: dict = {}
+
+
+def _to_review_out(review: FilterReview | None) -> FilterReviewOut | None:
+    if review is None:
+        return None
+    return FilterReviewOut(
+        fields=[
+            ReviewFieldOut(
+                name=f.name, type=f.type, value=f.value,
+                enum_values=f.enum_values, operators=f.operators,
+                min=f.min, max=f.max, unit=f.unit, essential=f.essential,
+            )
+            for f in review.fields
+        ],
+        sort=review.sort,
+        sort_options=review.sort_options,
+        limit=review.limit,
+        unmapped=review.unmapped,
+        dropped=review.dropped,
+        status=review.status,
+        missing_essential=review.missing_essential,
+        available_fields=review.available_fields,
+    )
 
 
 @app.post("/api/search", response_model=SearchResponse)
@@ -158,6 +214,7 @@ def api_search(req: SearchRequest):
             SuggestionOut(field=s.field, change=s.change, match_count=s.match_count)
             for s in result.suggestions
         ]
+        resp.review = _to_review_out(result.review)
         resp.total_time_ms = (time.perf_counter() - total_start) * 1000
         resp.cache_stats = _cache.stats()
         return resp
@@ -228,9 +285,68 @@ def api_search(req: SearchRequest):
         SuggestionOut(field=s.field, change=s.change, match_count=s.match_count)
         for s in result.suggestions
     ]
+    resp.review = _to_review_out(result.review)
 
     resp.total_time_ms = (time.perf_counter() - total_start) * 1000
     resp.cache_stats = _cache.stats()
+    return resp
+
+
+class EditRequest(BaseModel):
+    """User-edited filter submitted for re-validation and search."""
+    vertical: str                  # Which vertical's schema to validate against
+    filters: dict                  # The edited filter — untrusted input
+    sort: str | None = None
+    limit: int | None = None
+
+
+@app.post("/api/search/edit", response_model=SearchResponse)
+def api_search_edit(req: EditRequest):
+    """Re-validate an edited filter and search. The review/edit entry point.
+
+    The edited filter is untrusted — it goes through the same validator that
+    sits between the LLM and search. Invalid fields are dropped, not passed
+    through. A user editing "price ≤ 25000" to "price ≤ banana" is caught.
+    """
+    total_start = time.perf_counter()
+    resp = SearchResponse()
+
+    if req.vertical not in customer.verticals:
+        resp.notes = [f"Vertical '{req.vertical}' not found."]
+        resp.total_time_ms = (time.perf_counter() - total_start) * 1000
+        return resp
+
+    v = customer.verticals[req.vertical]
+    resp.routed_vertical = req.vertical
+    resp.route_mode = "edit"
+    resp.route_confidence = "high"
+
+    schema = load_schema(v["schema"])
+    data = json.loads(Path(v["data"]).read_text(encoding="utf-8"))
+    resp.display = schema.display
+
+    t0 = time.perf_counter()
+    result = run_from_edit(req.filters, schema, data, sort=req.sort, limit=req.limit)
+    resp.search_time_ms = (time.perf_counter() - t0) * 1000
+
+    resp.validated_filter = result.validated_filter
+    resp.sort = result.sort
+    resp.limit = result.limit
+    resp.unmapped = result.unmapped
+    resp.notes = result.notes
+    resp.rows = result.rows
+    resp.total_matches = result.total_matches
+    resp.needs_input = result.needs_input
+    resp.needs_input_kind = result.needs_input_kind
+    resp.missing_essential = result.missing_essential
+    resp.available_fields = result.available_fields
+    resp.suggestions = [
+        SuggestionOut(field=s.field, change=s.change, match_count=s.match_count)
+        for s in result.suggestions
+    ]
+    resp.review = _to_review_out(result.review)
+
+    resp.total_time_ms = (time.perf_counter() - total_start) * 1000
     return resp
 
 
