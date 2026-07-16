@@ -155,3 +155,29 @@ The system has two independent mechanisms that reduce LLM cost. They are not add
 ### Engine changes
 
 `engine.py` now exposes `run_from_filter(vf, schema, data)` — the deterministic-only entry point that cache hits use. `run()` (the full pipeline) calls `run_from_filter` internally after translation and validation. No duplication.
+
+## 25. Deferred feature backlog (v2 / v3)
+
+**Status:** Evaluated, deliberately not built. The product is buyer-ready. The scarce resource at this stage is a signed pilot, not more features. These are logged so they're not lost, sorted by when to revisit.
+
+**Guiding note:** these are deferred on purpose. The risk at this stage is building cool features instead of selling a ready product.
+
+### Part of the pitch now (build nothing)
+
+**Query-to-inventory gap analytics.** Every zero-result validated query is a structured record of demand the catalog can't satisfy. Near-zero engineering — the validated filter + zero-result signal already exist; the only work is logging them to a store. Potentially a second revenue line / data product independent of the search integration. Mention in sales conversations as a byproduct; build the logging when a customer wants the data.
+
+**Cross-vertical bundling** ("weekend trip to Vancouver" → flight + hotel + car). High demo/vision value, high build cost (multiple filters, date coherence across verticals, re-opens the routing ambiguity problem that Decision #17 carefully closed). Use as a vision slide. Do NOT build speculatively.
+
+### v2 — build once there's a paying customer or to strengthen a specific demo
+
+**Conversational refinement.** Multi-turn: "actually under $20k" mutates the prior validated filter instead of re-translating from scratch. Cheap for numeric mutations (deterministic patch to the cached filter); fuzzy changes ("blue instead") still need an LLM call to resolve what "instead" refers to — do not claim zero re-translation. Strongest candidate to build before a big demo, only if it doesn't delay the meeting.
+
+**Saved-search alerts.** The validated filter becomes a stored subscription predicate; new inventory is checked against stored filters and the user is notified on match. The concept is a small lift (reuse the filter as a predicate). The PRODUCTION system is not — needs a matching pipeline running on every inventory update, notification/delivery infrastructure, unsubscribe flow, and a subscription store. High retention leverage once deployed. Best v2 feature, but scope it honestly — the filter reuse is trivial; everything around it is real engineering.
+
+### v3 — after a customer and their real data exist
+
+**Voice input.** Speech-to-text upstream of the existing pipeline. The validator matters more here (noisy transcripts produce worse candidates, and the fail-closed behavior is what makes it safe). Trivial to add to the architecture; low marginal value until there's a customer whose users actually want voice search.
+
+**Intent classification** ("browse" vs "buy" vs "compare"). A lightweight classifier before translation that changes default sort, layout, or result count without touching filter logic. Useful for conversion optimization; irrelevant until there's real traffic to optimize.
+
+**Seller-side tagging assist.** Feed common unmapped terms back to merchants to close the demand-language/supply-metadata gap. If users keep searching "pet-friendly" and the schema doesn't have it, surface that signal to the merchant so they can add the field. Mainly relevant to marketplaces (a conditional target) — less useful for single-brand catalogs where the schema is internally controlled.
